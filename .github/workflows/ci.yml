@@ -5,38 +5,46 @@ on:
     branches: [main]
   pull_request:
 
-# The rule, as one sentence: the LATEST dependency set runs on every supported
-# Python; the FLOOR dependency set runs on the Python floor. A new Python can
-# only ever run dependency versions that shipped wheels for it, so old deps on
-# a new Python is a combination that cannot exist - and the floor's job is to
-# prove the ranges still work on the oldest supported setup, not every setup.
-# Adding a Python version is one entry in the list; the rule re-applies itself.
+# Three jobs, three postures:
+#
+# - floor:       the oldest Python supported + the oldest dependency versions
+#                the ranges claim (constraints/floor.txt). Proves the ranges
+#                are honest. Named - changing it is a support decision.
+# - recommended: the Python this project tells users to run, with today's
+#                dependencies. What `pip install notifig` gives a user today.
+#                Named - changing it is a recommendation, made on purpose.
+# - rolling:     python "3.x" resolves to the newest stable 3.x at run time,
+#                so this job chases Python's future and the latest
+#                dependencies with zero maintenance. It is the early warning:
+#                when a new Python or dependency breaks the library, this job
+#                turns red before anyone promised them. Until the next Python
+#                ships, it duplicates the recommended job on purpose.
+#
+# The justfile is the single source of truth for what these steps run - each
+# step invokes a recipe, so changing a recipe changes CI without editing this
+# file (run `just --list` locally to see them).
 jobs:
   check:
     runs-on: ubuntu-latest
-    name: py${{ matrix.python-version }} / ${{ matrix.deps }} deps
+    name: ${{ matrix.posture }} (py${{ matrix.python-version }})
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.13", "3.14"]
-        deps: ["latest"]
         include:
-          - deps: "floor"
+          - posture: floor
             python-version: "3.13"
+            constraints: "-c constraints/floor.txt"
+          - posture: recommended
+            python-version: "3.14"
+            constraints: ""
+          - posture: rolling
+            python-version: "3.x"
+            constraints: ""
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      # The floor leg pins every ranged dependency to the oldest version the
-      #  ranges claim to support (constraints/floor.txt); the latest leg
-      #  installs whatever PyPI serves today. If the suite fails on only one
-      #  leg, a range is lying - widen the code or narrow the range.
-      - run: pip install -e . pytest ruff mypy -c constraints/floor.txt
-        if: matrix.deps == 'floor'
-      - run: pip install -e . pytest ruff mypy
-        if: matrix.deps == 'latest'
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: mypy notifig/
-      - run: pytest tests/ -q
+      - uses: extractions/setup-just@v2
+      - run: pip install -e .[dev] ${{ matrix.constraints }}
+      - run: just ci
