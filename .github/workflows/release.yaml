@@ -41,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: dist
@@ -49,8 +50,10 @@ jobs:
         with:
           python-version: "3.13"
       # The published artifact must work without the repo: install the sdist
-      #  alone, run the suite against the installed package from a copy of
-      #  the tests (the tests are not part of the wheel).
+      #  alone, run the suite against the INSTALLED package from a copy of
+      #  the tests (the tests are not part of the wheel). The checkout exists
+      #  only so the tests can be copied; the package under test is the
+      #  sdist, not the checked-out tree.
       - run: pip install dist/*.tar.gz pytest
       - run: cp -r tests /tmp/tests && cd /tmp && python -m pytest tests -q
 
