@@ -69,6 +69,6 @@ ignore = ["E501"]  # E501: line too long
 ignore_missing_imports = true
 warn_unused_ignores = true
 
-# TODO: [tool.importlinter] — the layering contracts move over from solveig's
-#  pyproject (the config-library contracts belong to this repo now, and the
-#  "never imports solveig" contract becomes "never imports anything app-shaped").
+# TODO: [tool.importlinter] - the layering contracts belong in this repo once
+#  the package grows internal layering worth enforcing ("never imports anything
+#  app-shaped" is the spirit of the one this repo was born with).

@@ -11,7 +11,6 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 from .meta import ConfigDict
 
-
 FILE_EXTENSIONS: tuple[str, ...] = ("json", "yaml", "yml", "toml")
 
 

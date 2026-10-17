@@ -17,8 +17,8 @@ from notifig.section.dynamic import DynamicSection
 
 class EntryConfig(ConfigSection):
     """The entry type the smoke suite's dynamic section holds: the shared
-    `enabled` flag, plus a `ClassVar` stamp slot like solveig's tool configs
-    carry — an untyped entry has no owner, a typed one does."""
+    `enabled` flag, plus a `ClassVar` stamp slot like a tool's config class
+    carries - an untyped entry has no owner, a typed one does."""
 
     enabled: bool = True
     owner: ClassVar[str | None] = None

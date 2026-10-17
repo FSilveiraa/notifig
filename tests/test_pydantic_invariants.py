@@ -3,7 +3,7 @@
 Notifig does not merely USE pydantic - it stands on undocumented shapes:
 generic metadata, the extra-values mechanism, ``validate_assignment``. A
 pydantic bump can change any of these without our code changing at all. This
-file is the upgrade gate from solveig's dependency policy, carried here: run
+file is the upgrade gate for a library built on dependency internals: run
 it on any dependency bump; the tier in each test's docstring says how to react.
 
 Tiers:
