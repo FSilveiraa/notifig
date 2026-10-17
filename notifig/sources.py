@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 from .meta import ConfigDict
 
-# DEFAULT_CONFIG_SEARCH: list[str] = ["./.solveig/config", "~/.solveig/config"]
+
 FILE_EXTENSIONS: tuple[str, ...] = ("json", "yaml", "yml", "toml")
 
 

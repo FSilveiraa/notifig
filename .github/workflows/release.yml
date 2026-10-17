@@ -18,6 +18,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      # pyproject.toml is the single source of truth for the version; the tag
+      #  only presses the button. A tag that disagrees with the declared
+      #  version is a mistake, and publishing one would ship a version number
+      #  nobody declared.
+      - name: The tag matches the declared version
+        run: |
+          declared=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          pushed="${GITHUB_REF_NAME#v}"
+          if [ "$pushed" != "$declared" ]; then
+            echo "tag v$pushed does not match pyproject version $declared"
+            exit 1
+          fi
       - run: pip install build
       - run: python -m build
       - uses: actions/upload-artifact@v4
