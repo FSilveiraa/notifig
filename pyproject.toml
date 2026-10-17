@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "notifig"
+version = "0.1.0"
+description = "Reactive typed configuration for Pydantic: a config tree that tells you what changed."
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Francisco"}
+]
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.13.4",
+    # Direct dependency: `sources.py` builds on pydantic-settings' source
+    # machinery (`PydanticBaseSettingsSource`), and the CLI parsing contract
+    # (`CliSettingsSource`, `cli_implicit_flags`) is its API too.
+    "pydantic-settings>=2.14.2,<3",
+    # File sources (`sources.py`) load and merge through anyconfig.
+    "anyconfig>=0.15.1",
+    # Readers for the file extensions `FILE_EXTENSIONS` names. anyconfig can
+    # import its own parsers, but a clean install must be able to read every
+    # format the library claims, so the parsers are direct dependencies.
+    "pyyaml>=6.0.3",
+    "toml>=0.10.2",
+]
+
+[project.urls]
+# TODO: docs URL once it exists.
+
+[tool.setuptools.packages.find]
+include = ["notifig*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP"]
+ignore = ["E501"]  # E501: line too long
+
+[tool.mypy]
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+# TODO: [tool.importlinter] — the layering contracts move over from solveig's
+#  pyproject (the config-library contracts belong to this repo now, and the
+#  "never imports solveig" contract becomes "never imports anything app-shaped").

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self, overload
 
 if TYPE_CHECKING:
-    from config.section.static import ConfigSection
+    from notifig.section.static import ConfigSection
 
 
 @dataclass(frozen=True)
