@@ -13,9 +13,11 @@ runtime reacts to configuration changes instead of re-reading them.
 ```python
 from notifig import Config, ConfigSection
 
+
 class ApiConfig(ConfigSection):
     url: str
     model: str | None = None
+
 
 class Settings(Config):
     api: ApiConfig
@@ -43,8 +45,9 @@ class Settings(Config):
   than a silent fallback.
 
 ```python
-settings.api.model = "new-model"        # sync observers run; async ones are returned
-settings["api.url"] = "https://..."     # the same, by name
+settings.api.model = "new-model"  # sync observers run; async ones are returned
+settings["api.url"] = "https://..."  # the same, by name
+
 
 @settings.on_change("api.model")
 def model_changed(section, changes):

@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.13 is the floor (PEP 695 generics in the section types); 3.14
+        # rides along while it is the current release.
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e . pytest ruff mypy
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy notifig/
+      - run: pytest tests/ -q
