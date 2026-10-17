@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# The rule, as one sentence: the LATEST dependency set runs on every supported
+# Python; the FLOOR dependency set runs on the Python floor. A new Python can
+# only ever run dependency versions that shipped wheels for it, so old deps on
+# a new Python is a combination that cannot exist - and the floor's job is to
+# prove the ranges still work on the oldest supported setup, not every setup.
+# Adding a Python version is one entry in the list; the rule re-applies itself.
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -13,13 +19,10 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-        deps: ["floor", "latest"]
-        exclude:
-          # pydantic-core at the floor has no wheels for 3.14 and its source
-          #  build refuses (PyO3's supported ceiling); the floor policy is
-          #  anchored on the Python floor (3.13) and tested there.
-          - python-version: "3.14"
-            deps: "floor"
+        deps: ["latest"]
+        include:
+          - deps: "floor"
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
