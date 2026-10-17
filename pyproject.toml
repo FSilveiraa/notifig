@@ -13,23 +13,28 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    # The floor is the developed/tested version; the ceiling is a major we owe
-    #  nothing to. Notifig leans on pydantic internals on purpose - the generic
+    # The floors are a support policy, not an empirical claim: the full suite
+    #  bisects clean down to pydantic 2.0.3 (with any pydantic-settings), and
+    #  pydantic-settings itself breaks below 2.10.0 (`cli_shortcuts` and the
+    #  ConfigDict-driven CLI customization landed there). What the range
+    #  declares is what the CI matrix answers bugs for - roughly the last two
+    #  years of pydantic 2.x - and the matrix tests BOTH ends of every range
+    #  (see .github/workflows/ci.yml). The ceiling is a major we owe nothing
+    #  to. Notifig leans on pydantic internals on purpose - the generic
     #  metadata that binds a config model to its declarer, `__pydantic_extra__`
     #  typed so dynamic entries instantiate eagerly, `validate_assignment`
-    #  stamping entry names - so a minor cannot be trusted blind either. The
-    #  CI matrix tests both ends of every range (see .github/workflows/ci.yml),
-    #  and tests/test_pydantic_invariants.py is the upgrade gate: run it on any
-    #  bump, its tier labels say how to react.
-    "pydantic>=2.13.4,<3",
+    #  stamping entry names - so a minor cannot be trusted blind either;
+    #  tests/test_pydantic_invariants.py is the upgrade gate, its tier labels
+    #  say how to react.
+    "pydantic>=2.10,<3",
     # Direct dependency: `sources.py` builds on pydantic-settings' source
     #  machinery (`PydanticBaseSettingsSource`), and the CLI parsing contract
-    #  (`CliSettingsSource`, `cli_implicit_flags`) is its API too - including
-    #  one private parser class. Same floor/ceiling rule as pydantic.
-    "pydantic-settings>=2.14.2,<3",
+    #  (`CliSettingsSource`, `cli_shortcuts`, `cli_implicit_flags`) is its API
+    #  too. Same floor/ceiling rule as pydantic.
+    "pydantic-settings>=2.10.0,<3",
     # File sources (`sources.py`) load and merge through anyconfig. The surface
     #  used is two functions and a merge strategy constant, stable across its
-    #  history - a floor, no ceiling.
+    #  history (the suite passes against 0.14.x as well) - a floor, no ceiling.
     "anyconfig>=0.15.1",
     # Readers for the file extensions `FILE_EXTENSIONS` names. anyconfig can
     #  import its own parsers, but a clean install must be able to read every

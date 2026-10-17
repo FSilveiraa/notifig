@@ -11,7 +11,6 @@ from pydantic import (
     PrivateAttr,
     TypeAdapter,
     ValidationError,
-    create_model,
     model_serializer,
     model_validator,
 )
@@ -101,10 +100,16 @@ class DynamicSection[T](ConfigSection):
             #  Rebuilding it would add a second class with a synthetic name, visible
             #  in reprs and validation errors, for exactly the same behaviour.
             if cls._entry_type.model_config.get("extra") != "allow":
-                cls._entry_type = create_model(
+                # A plain subclass, not `create_model`: the copy needs exactly
+                #  one thing from pydantic - that a child's `model_config`
+                #  overrides its parent's - and a class statement asks for it
+                #  in the way every pydantic 2.x answers, where
+                #  `create_model(__base__=..., __config__=...)` is only legal
+                #  since 2.11. One less internal to stand on.
+                cls._entry_type = type(
                     f"{cls._entry_type.__name__}_Preserving",
-                    __base__=cls._entry_type,
-                    __config__=ConfigDict(extra="allow"),
+                    (cls._entry_type,),
+                    {"model_config": ConfigDict(extra="allow")},
                 )
             # The entry type of this section. pydantic reads this line while it is
             #  still building the model, and never looks at the value again — a write
