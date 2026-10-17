@@ -23,10 +23,6 @@ _MUTABLE = ConfigDict(
     # The config holds non-pydantic types. Without this flag,
     # pydantic rejects a field whose type isn't a BaseModel/builtin.
     arbitrary_types_allowed=True,
-    # Models are serialized by their runtime class, not their declared one.
-    # Ensures a `DynamicSection[MyBaseClass]` will serialize entries according
-    #  to their actual class serialization, not their base class.
-    polymorphic_serialization=True,
     # Ensures that unknown keys raise an error
     extra="forbid",
 )

@@ -14,6 +14,12 @@ jobs:
       matrix:
         python-version: ["3.13", "3.14"]
         deps: ["floor", "latest"]
+        exclude:
+          # pydantic-core at the floor has no wheels for 3.14 and its source
+          #  build refuses (PyO3's supported ceiling); the floor policy is
+          #  anchored on the Python floor (3.13) and tested there.
+          - python-version: "3.14"
+            deps: "floor"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -118,6 +118,25 @@ def test_an_entry_name_cannot_carry_a_dot():
         )
 
 
+def test_an_entry_serializes_by_its_runtime_class():
+    """A subclassed entry (re-typed through `set_type`) round-trips its own
+    fields: serializing the section must serialize the value by the class it
+    actually IS, not the section's declared entry type. This is the behaviour
+    `ConfigDict.polymorphic_serialization` was once thought to provide - the
+    probe showed pydantic already does it for our shapes, so the flag was
+    removed; this test is what guards against re-adding it (or a pydantic
+    change) wrongly."""
+
+    class RichEntry(EntryConfig):
+        extra_field: str = "x"
+
+    settings = make_settings()
+    settings.plugins.set_type(rich=RichEntry)
+    settings.plugins["rich"].extra_field = "kept"
+    serialized = settings.model_dump(mode="json")["plugins"]["rich"]
+    assert serialized == {"enabled": True, "extra_field": "kept"}
+
+
 def test_a_failing_set_type_leaves_the_entry_in_place():
     """Refusal must not destroy the entry — the data is the user's, and the
     next (fixed) `set_type` has to find it."""
