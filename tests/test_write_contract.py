@@ -95,6 +95,25 @@ def test_a_sync_observer_raising_does_not_undo_the_write():
     assert settings.api.url == "https://other.test"  # applied
 
 
+def test_dotted_setitem_carries_the_plain_assignment_semantics():
+    """`section["api.url"] = v` is `section.api.url = v` down to the refusal:
+    an async observer on the path stops it before anything is applied."""
+    settings = make_settings()
+    heard: list = []
+
+    @settings.on_change("api.model")
+    async def hear(_section, changes):
+        heard.extend(change.path for change in changes)
+
+    with pytest.raises(AsyncObserversNotCalled):
+        settings["api.model"] = "unapplied"
+    assert settings.api.model is None
+    assert heard == []
+    # and the sync case lands where plain assignment puts it
+    settings["api.url"] = "https://other.test"
+    assert settings.api.url == "https://other.test"
+
+
 def test_unset_removes_an_entry_with_a_deleted_notification(settings):
     settings.plugins["ghost"] = {"enabled": True}
     heard: list = []

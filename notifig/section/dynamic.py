@@ -137,6 +137,26 @@ class DynamicSection[T](ConfigSection):
             cls._entry_type = class_args[0]
             cls._declared_entry_type = class_args[0]
 
+    @model_validator(mode="after")
+    def _reject_dotted_entry_names(self) -> DynamicSection:
+        """An entry's name carries no dots. `section["a.b"]` navigates to `b`
+        inside `a`, so an entry named `a.b` could never be read back — not by
+        `[]`, not as an attribute, not by a dotted path. This is the parse-time
+        half of the rule (`DynamicSection._set` refuses the write-time half):
+        a config file block whose key carries a dot is a load error, not a
+        silently kept unreachable object. Reads only; nothing here re-enters."""
+        dotted = [name for name in (self.model_extra or {}) if "." in name]
+        if dotted:
+            subject = "these names" if len(dotted) > 1 else "this name"
+            verb = "carry" if len(dotted) > 1 else "carries"
+            raise ValueError(
+                f"{subject} cannot be an entry name (a dot means 'one level "
+                f'down\': section["a.b"] reads b inside a, so an entry that '
+                f"{verb} one could never be read back): "
+                f"{', '.join(map(repr, sorted(dotted)))}. Rename it."
+            )
+        return self
+
     @model_validator(mode="wrap")
     @classmethod
     def _keep_untyped_entries_aside(cls, data: Any, handler) -> Any:
@@ -197,6 +217,17 @@ class DynamicSection[T](ConfigSection):
 
         changes: list[ConfigChange] = []
         for name, model in types_to_set.items():
+            # An entry's name carries no dots (`section["a.b"]` navigates to
+            #  `b` inside `a`): checked here, BEFORE anything is built or
+            #  stored — a refusal mid-loop must leave the section untouched,
+            #  and `BaseModel.__setattr__` below does not roll its write back
+            #  when `validate_assignment` rejects it.
+            if "." in name:
+                raise ValueError(
+                    f"{name!r} cannot be an entry name: a dot means 'one "
+                    f'level down\' (section["a.b"] reads b inside a), so an '
+                    f"entry carrying one could never be read back. Rename it."
+                )
             current = (self.model_extra or {}).get(name)
             if current is not None and type(current) is model:
                 continue  # Same type, don't rebuild so sections don't lose observers
@@ -307,6 +338,17 @@ class DynamicSection[T](ConfigSection):
         # 1. A declared field
         if name in type(self).model_fields:
             return super()._set(name, value)
+
+        # An entry's name carries no dots: `section["a.b"]` navigates to `b`
+        #  inside `a`, so a name with a dot in it could never be read back —
+        #  not by `[]`, not as an attribute, not by a dotted path. Refusing
+        #  here is what makes "the dot always navigates" unambiguous.
+        if "." in name:
+            raise ValueError(
+                f"{name!r} cannot be an entry name: a dot means 'one level "
+                f"down', so an entry carrying one could never be read back. "
+                f"Rename it."
+            )
 
         # 2. An entry that already exists: its own class types the value
         entries = self.model_extra or {}

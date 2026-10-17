@@ -9,6 +9,8 @@ outward from here per area.
 import asyncio
 from typing import ClassVar
 
+import pytest
+
 from notifig import Config, ConfigSection
 from notifig.section.dynamic import DynamicSection
 
@@ -23,9 +25,13 @@ class EntryConfig(ConfigSection):
 
 
 def make_settings():
+    class InnerConfig(ConfigSection):
+        token: str = "default-token"
+
     class ApiConfig(ConfigSection):
         url: str = "https://default.test"
         model: str | None = None
+        inner: InnerConfig = InnerConfig()
 
     class PluginsConfig(DynamicSection[EntryConfig]):
         pass
@@ -35,7 +41,11 @@ def make_settings():
         plugins: PluginsConfig
 
     # `parse_cli=False`: the smoke tests must not read pytest's own argv.
-    return Settings(api={"url": "https://example.test/v1"}, plugins={}, parse_cli=False)
+    return Settings(
+        api={"url": "https://example.test/v1", "inner": {"token": "t"}},
+        plugins={},
+        parse_cli=False,
+    )
 
 
 def test_write_and_read_by_name():
@@ -43,6 +53,32 @@ def test_write_and_read_by_name():
     settings.api["url"] = "https://other.test/v1"
     assert settings.api["url"] == "https://other.test/v1"
     assert settings.api.url == settings.api["url"]
+
+
+def test_write_and_read_by_dotted_path():
+    """`[]` navigates: a dotted key is the chained/dotted write and read."""
+    settings = make_settings()
+    settings["api.url"] = "https://other.test/v1"
+    assert settings["api.url"] == "https://other.test/v1"
+    assert settings.api.url == settings["api.url"]
+    assert settings["api"]["url"] == settings["api.url"]  # chains agree
+    # deep paths too
+    settings["api.inner.token"] = "t2"
+    assert settings["api.inner.token"] == "t2"
+
+
+def test_dotted_access_refuses_missing_levels_with_a_keyerror():
+    settings = make_settings()
+    with pytest.raises(KeyError):
+        settings["api.nope"]  # no such field
+    with pytest.raises(KeyError):
+        settings["api.inner.nope"]
+    with pytest.raises(KeyError):
+        settings["nope.url"]  # no such intermediate section
+    with pytest.raises(KeyError):
+        settings["api.url.x"]  # the leaf is a str, not a section
+    # and nothing was created
+    assert "nope" not in settings.api.model_fields_set
 
 
 def test_dotted_path_walk_and_set():

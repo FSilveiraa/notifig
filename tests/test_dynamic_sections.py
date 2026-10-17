@@ -99,6 +99,25 @@ def test_set_type_retypes_an_unowned_block_and_stamps_the_classvar():
     assert typed.enabled is False  # the block's value, adopted
 
 
+def test_an_entry_name_cannot_carry_a_dot():
+    """`section["a.b"]` navigates to `b` inside `a`, so an entry named `a.b`
+    could never be read back — by `[]`, as an attribute, or by a dotted path.
+    Both doors refuse: `set_type` (the write path) and the config load
+    (a block whose key carries a dot is a load error, not a kept object)."""
+    settings = make_settings()
+    with pytest.raises(ValueError, match="cannot be an entry name"):
+        settings.plugins.set_type("a.b", TypedEntry)
+    assert "a.b" not in dict(settings.plugins)
+    assert "a" not in dict(settings.plugins)  # nothing half-created
+
+    with pytest.raises(ValidationError):
+        type(settings)(
+            api={"url": "https://example.test/v1"},
+            plugins={"a.b": {"enabled": True}},
+            parse_cli=False,
+        )
+
+
 def test_a_failing_set_type_leaves_the_entry_in_place():
     """Refusal must not destroy the entry — the data is the user's, and the
     next (fixed) `set_type` has to find it."""

@@ -107,12 +107,37 @@ class ConfigSection(BaseModel):
         return self
 
     def __getitem__(self, name: str) -> Any:
-        if name not in self:
+        """Dict-style access by NAME, or by a dotted PATH that navigates.
+
+        `section["api.url"]` is `section["api"]["url"]` is `section.api.url`:
+        the dot always means "one level down", so a name carrying one is
+        unreachable here — declared fields cannot carry dots, and dynamic
+        entries refuse them (`DynamicSection._set`). Missing names raise
+        `KeyError`: the dict protocol's own failure (`PathNotFound` stays the
+        path API's)."""
+        section, _dot, rest = name.partition(".")
+        if section not in self:
             raise KeyError(name)
-        return getattr(self, name)
+        value = getattr(self, section)
+        if not rest:
+            return value
+        if not isinstance(value, ConfigSection):
+            raise KeyError(name)
+        try:
+            return value[rest]
+        except KeyError:
+            raise KeyError(name) from None
 
     def __setitem__(self, name: str, value: Any) -> None:
-        setattr(self, name, value)
+        """Dict-style assignment by NAME, or by a dotted PATH: navigate to the
+        path's owner and assign there, so `section["api.url"] = ...` carries
+        exactly the semantics — including the async-observer refusal — of
+        `section.api.url = ...`. A missing intermediate section raises
+        `KeyError`, never creates one: `[]` writes into the tree, it does not
+        declare structure."""
+        parent, _dot, leaf = name.rpartition(".")
+        target = self[parent] if parent else self
+        setattr(target, leaf, value)
 
     # NOTE: hidden from type checkers. A visible `__setattr__(name: str, ...)`
     #  tells them any attribute may be assigned, so `config.api.modle = "x"`
