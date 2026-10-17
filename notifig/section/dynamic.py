@@ -137,46 +137,45 @@ class DynamicSection[T](ConfigSection):
             cls._entry_type = class_args[0]
             cls._declared_entry_type = class_args[0]
 
-    @model_validator(mode="after")
-    def _reject_dotted_entry_names(self) -> DynamicSection:
-        """An entry's name carries no dots. `section["a.b"]` navigates to `b`
-        inside `a`, so an entry named `a.b` could never be read back — not by
-        `[]`, not as an attribute, not by a dotted path. This is the parse-time
-        half of the rule (`DynamicSection._set` refuses the write-time half):
-        a config file block whose key carries a dot is a load error, not a
-        silently kept unreachable object. Reads only; nothing here re-enters."""
-        dotted = [name for name in (self.model_extra or {}) if "." in name]
-        if dotted:
-            subject = "these names" if len(dotted) > 1 else "this name"
-            verb = "carry" if len(dotted) > 1 else "carries"
-            raise ValueError(
-                f"{subject} cannot be an entry name (a dot means 'one level "
-                f'down\': section["a.b"] reads b inside a, so an entry that '
-                f"{verb} one could never be read back): "
-                f"{', '.join(map(repr, sorted(dotted)))}. Rename it."
-            )
-        return self
-
     @model_validator(mode="wrap")
     @classmethod
-    def _keep_untyped_entries_aside(cls, data: Any, handler) -> Any:
-        """
-        Ensures entries read from a file with no known type yet are kept
-        in `_unresolved` until `set_type()` gives them a type.
-        """
-        # If the current entry is a pydantic model, or if the data isn't a dict,
-        #  let pydantic and the section validation take over
-        if _is_pydantic_model(cls._entry_type) or not isinstance(data, dict):
+    def _instantiate_entries(cls, data: Any, handler) -> Any:
+        """THE entrypoint a block crosses to become an entry.
+
+        A block is validated against the entry type the moment it arrives -
+        at construction (a config file at parse time) and at every assignment
+        re-validation - so a malformed block is a loud error where it lands,
+        never a latent one. An entry type that is not a pydantic model cannot
+        hold a block: those wait in `_unresolved`, as written, until
+        `set_type()` gives the section a model to build with.
+
+        Assignment re-validation hands this validator the already-built model
+        rather than a dict (writes build through `DynamicSection._set`); it
+        passes through untouched."""
+        if isinstance(data, BaseModel) or not isinstance(data, dict):
+            # Assignment re-validation sees the built model; non-dict data is
+            #  pydantic's business.
             return handler(data)
 
-        # Otherwise, create the model only from the declared fields and
-        #  insert the undeclared ones manually
         declared, pending = {}, {}
         for name, value in data.items():
             if name in cls.model_fields:
                 declared[name] = value
             else:
                 pending[name] = value
+
+        # An entry's name carries no dots - see `_entry_name_error`: refused
+        #  at the door, not kept as an unreachable object.
+        for name in pending:
+            if "." in name:
+                raise _entry_name_error(name)
+
+        if _is_pydantic_model(cls._entry_type):
+            # Build every block NOW, from the entry type: one malformed block
+            #  is one loud error, and a valid block is a live entry.
+            for name, value in pending.items():
+                pending[name] = TypeAdapter(cls._entry_type).validate_python(value)
+            return handler({**declared, **pending})
 
         section = handler(declared)
         for name, value in pending.items():
@@ -217,17 +216,13 @@ class DynamicSection[T](ConfigSection):
 
         changes: list[ConfigChange] = []
         for name, model in types_to_set.items():
-            # An entry's name carries no dots (`section["a.b"]` navigates to
-            #  `b` inside `a`): checked here, BEFORE anything is built or
-            #  stored — a refusal mid-loop must leave the section untouched,
-            #  and `BaseModel.__setattr__` below does not roll its write back
+            # An entry's name carries no dots - see `_entry_name_error`:
+            #  checked here, BEFORE anything is built or stored — a refusal
+            #  mid-loop must leave the section untouched, and
+            #  `BaseModel.__setattr__` below does not roll its write back
             #  when `validate_assignment` rejects it.
             if "." in name:
-                raise ValueError(
-                    f"{name!r} cannot be an entry name: a dot means 'one "
-                    f'level down\' (section["a.b"] reads b inside a), so an '
-                    f"entry carrying one could never be read back. Rename it."
-                )
+                raise _entry_name_error(name)
             current = (self.model_extra or {}).get(name)
             if current is not None and type(current) is model:
                 continue  # Same type, don't rebuild so sections don't lose observers
@@ -344,11 +339,7 @@ class DynamicSection[T](ConfigSection):
         #  not by `[]`, not as an attribute, not by a dotted path. Refusing
         #  here is what makes "the dot always navigates" unambiguous.
         if "." in name:
-            raise ValueError(
-                f"{name!r} cannot be an entry name: a dot means 'one level "
-                f"down', so an entry carrying one could never be read back. "
-                f"Rename it."
-            )
+            raise _entry_name_error(name)
 
         # 2. An entry that already exists: its own class types the value
         entries = self.model_extra or {}
@@ -415,6 +406,22 @@ class DynamicSection[T](ConfigSection):
         yield name, FieldInfo.from_annotation(cls._entry_type)
         if rest:
             yield f"{name}.{rest}", FieldInfo.from_annotation(Any)
+
+
+def _entry_name_error(name: str) -> ValueError:
+    """The one refusal message for an entry name carrying a dot.
+
+    `section["a.b"]` navigates to `b` inside `a`, so an entry named `a.b`
+    could never be read back - not by `[]`, as an attribute, or by a dotted
+    path. The rule is enforced at every door a name can enter through
+    (`_instantiate_entries` for parsed data, `DynamicSection._set` for plain
+    writes, `set_type` for re-typing) because pydantic's doors differ; the
+    MESSAGE has this one home."""
+    return ValueError(
+        f"{name!r} cannot be an entry name: a dot means 'one level down' "
+        f'(section["a.b"] reads b inside a), so an entry carrying one could '
+        f"never be read back. Rename it."
+    )
 
 
 def _is_pydantic_model(t: Any) -> bool:

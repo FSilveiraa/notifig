@@ -8,17 +8,25 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    name: py${{ matrix.python-version }} / ${{ matrix.deps }} deps
     strategy:
+      fail-fast: false
       matrix:
-        # 3.13 is the floor (PEP 695 generics in the section types); 3.14
-        # rides along while it is the current release.
         python-version: ["3.13", "3.14"]
+        deps: ["floor", "latest"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      # The floor leg pins every ranged dependency to the oldest version the
+      #  ranges claim to support (constraints/floor.txt); the latest leg
+      #  installs whatever PyPI serves today. If the suite fails on only one
+      #  leg, a range is lying - widen the code or narrow the range.
+      - run: pip install -e . pytest ruff mypy -c constraints/floor.txt
+        if: matrix.deps == 'floor'
       - run: pip install -e . pytest ruff mypy
+        if: matrix.deps == 'latest'
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy notifig/

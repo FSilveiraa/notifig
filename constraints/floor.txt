@@ -1,0 +1,9 @@
+# The floor of every ranged dependency, as one pip constraints file. The CI
+# "floor" leg installs the package against exactly these; the "latest" leg
+# installs without it. If a test fails only under one leg, the range is lying
+# about what the library supports - widen the code or narrow the range.
+pydantic==2.13.4
+pydantic-settings==2.14.2
+anyconfig==0.15.1
+pyyaml==6.0.3
+toml==0.10.2

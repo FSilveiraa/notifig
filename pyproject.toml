@@ -13,18 +13,39 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "pydantic>=2.13.4",
+    # The floor is the developed/tested version; the ceiling is a major we owe
+    #  nothing to. Notifig leans on pydantic internals on purpose - the generic
+    #  metadata that binds a config model to its declarer, `__pydantic_extra__`
+    #  typed so dynamic entries instantiate eagerly, `validate_assignment`
+    #  stamping entry names - so a minor cannot be trusted blind either. The
+    #  CI matrix tests both ends of every range (see .github/workflows/ci.yml),
+    #  and tests/test_pydantic_invariants.py is the upgrade gate: run it on any
+    #  bump, its tier labels say how to react.
+    "pydantic>=2.13.4,<3",
     # Direct dependency: `sources.py` builds on pydantic-settings' source
-    # machinery (`PydanticBaseSettingsSource`), and the CLI parsing contract
-    # (`CliSettingsSource`, `cli_implicit_flags`) is its API too.
+    #  machinery (`PydanticBaseSettingsSource`), and the CLI parsing contract
+    #  (`CliSettingsSource`, `cli_implicit_flags`) is its API too - including
+    #  one private parser class. Same floor/ceiling rule as pydantic.
     "pydantic-settings>=2.14.2,<3",
-    # File sources (`sources.py`) load and merge through anyconfig.
+    # File sources (`sources.py`) load and merge through anyconfig. The surface
+    #  used is two functions and a merge strategy constant, stable across its
+    #  history - a floor, no ceiling.
     "anyconfig>=0.15.1",
     # Readers for the file extensions `FILE_EXTENSIONS` names. anyconfig can
-    # import its own parsers, but a clean install must be able to read every
-    # format the library claims, so the parsers are direct dependencies.
+    #  import its own parsers, but a clean install must be able to read every
+    #  format the library claims, so the parsers are direct dependencies.
     "pyyaml>=6.0.3",
     "toml>=0.10.2",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 
 [project.urls]
