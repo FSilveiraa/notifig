@@ -1,63 +1,117 @@
+from notifig import CommaSeparatedfrom dataclasses import Field
+
 # Notifig
 
-**Reactive typed configuration for Pydantic — a config tree that tells you what changed.**
+**A highly declarative, strictly typed, reactive config**
 
-Notifig is a configuration library built on pydantic and pydantic-settings. You
-declare a config tree of nested sections; the library loads it from layered
-files (JSON/YAML/TOML), env vars and the CLI; and — the part nothing else
-offers — **every write notifies the observers that care about it**, so the
-runtime reacts to configuration changes instead of re-reading them.
+Notifig is a configuration library built on Pydantic, and strongly rooted on these principles:
 
-## The shape
+<details>
+<summary><b>Declaration is behavior</b> - The shape of a config field derives its usage.</summary>
+
+Validation, serialization, value choices, CLI flags, all follow from writing the field itself.
+For example, this statement creates a `colors` field that only accepts certain values and can be
+set both with comma-separated values (`--color "blue,red""`) or explicit lists: 
 
 ```python
-from notifig import Config, ConfigSection
+# Color type with restricted values
+ColorType = Choice(["red", "green", "blue"]) 
+# List that can parse/serialize comma-delimited color names
+ColorList = CommaSeparated[ColorType]
+
+# List of colors with CLI flags
+colors: Annotated[
+    ColorList,
+    CliFlags(["color", "c"]), # creates --color/-c CLI flags
+] = Field(
+    default="green",          # default value
+    description="...",        # info string for --help and CLI errors
+)
+
+# Usage
+#   YAML: `colors: green,blue`
+#   CLI:  `--colors "blue,red"`
+```
+</details>
 
 
-class ApiConfig(ConfigSection):
-    url: str
-    model: str | None = None
+<details>
+<summary><b>Single source of truth</b> - Settings should be declared once, in a single mutable single register.</summary>
 
+A common example is mapping CLI flags to their config value, which usually involves maintaining a parallel
+dict that references fields by string name and needs to be manually kept in sync with the config itself:
+
+```python
+class BadSettings:
+    foo: str
+    bar: str | None = None
+    baz: int  # We added baz, but forgot to add its CLI flag below
+
+# If any field gets renamed or deleted, someone has to remember to change it here.
+CLI_FLAGS = {
+    "foo": "foo",
+    "f": "foo",
+    "bar": "bar"
+}
+
+# Requires merging the CLI data into config fields 
+for flag, value in cli_data.items():
+    if (field := CLI_FLAGS[flag]):
+        setattr(config, field, value)
+```
+
+With Notifig, the CLI flags live on their respective field declarations.
+Deleting or altering a field and all its flags only touches one statement, in a single place.
+
+```python
+class Settings(Config):
+    foo: Annotated[str, CliFlags("foo", "f")] = Field(description="Value of Foo")
+    bar: Annotated[str|None, CliFlags("bar")] = Field(
+        description="Name of Bar, if any",
+        default=None,
+    )
+    baz: int = Field(description="Amount of Baz")
+```
+</details>
+
+
+<details>
+<summary><b>Distributed awareness</b> - Each part of an application only interacts with its own config section.</summary>
+
+An application's structure hierarchy should map to its config structure.
+Each component declares its own config section with the fields it needs, and does not need to be 
+</details>
+
+
+<details>
+<summary><b>Reactive state</b> - Changes in the config should inform anyone interested.</summary>
+
+Adding, changing or deleting an entry should able to trigger behavior instead of relying on periodic checks.
+An observer is a callable or coroutine registered to a path, and it's called whenever it is altered.
+A simple example where changing a UI's theme causes it to redraw:
+
+```python
+class UIConfig(ConfigSection):
+    theme: Annotated[Choices(["dark", "light"])] = Field(default="light")
 
 class Settings(Config):
-    api: ApiConfig
+    ui: UIConfig
+
+config = Settings()
+
+# sync observer that logs every change
+@config.on_change()
+def print_changes(section: ConfigSection, changes: tuple[Change]):
+    for change in changes:
+        print(f"Change of type {change.__class__.__name__} on {change.path}")
+
+# async observer
+@config.on_change("ui.theme")
+async def redraw_theme(section: ConfigSection, changes: tuple[Change]):
+    await interface.update_theme(section.ui.theme)
 ```
+</details>
 
-- **Sections are components.** A section is a `ConfigSection` — a nested model
-  with its own fields, its own validation, and its own position in the tree.
-  A module that owns a feature declares its own section; the config tree just
-  names them.
-- **Dynamic sections hold entries that type themselves.** A
-  `DynamicSection[EntryType]` instantiates a config block into an entry the
-  moment the block arrives, and re-types it with `set_type(name, model)` when
-  the model that owns it becomes known — a config file may hold settings for
-  something not yet installed, and the entry waits, visible and editable,
-  until it arrives.
-- **Writes notify.** Every mutation (`set`, `unset`, `set_type`, `remove_type`,
-  plain `section[name] = value`) walks the change to every registered observer
-  — above and below the changed section, two-way path matching — and runs it.
-  Writes are sync and atomic; async observers' coroutines are handed back to
-  the caller (`set_and_wait` is the one `async def`), and a plain assignment
-  that would reach an async observer refuses loudly *before changing
-  anything* (`AsyncObserversNotCalled`).
-- **Sources layer.** Files deep-merge (local over global), env vars and CLI
-  flags override, and legacy keys are a hard break with an explicit map rather
-  than a silent fallback.
-
-```python
-settings.api.model = "new-model"  # sync observers run; async ones are returned
-settings["api.url"] = "https://..."  # the same, by name
-
-
-@settings.on_change("api.model")
-def model_changed(section, changes):
-    print("the model changed:", changes)
-```
-
-## Status
-
-Pre-release. The API is real and battle-tested inside its first application,
-but the standalone packaging, CI and test suite are being built here now.
 
 ## Install
 
@@ -66,3 +120,22 @@ pip install notifig
 ```
 
 Requires Python ≥ 3.13.
+
+
+### Features
+- **Custom annotations** - Notifig introduces several custom Pydantic annotations to express behavior from types:
+  - `CliFlags` - adds a shortcut CLI flag for a field
+  - `Choice` - restricts the values a field can take according to a list of options
+  - `CommaSeparated` - allows parsing a list delimited by `,`
+  - `Link` - links one field to another through its full path 
+- **Observers** - 
+- Static and Dynamic sections
+- Obvious usage - `bar = section.foo`, `section["foo"] = "baz"`, `section.get("foo.bar")`, `for name, field in section`
+- File formats: supports parsing and serializing config files using JSON, YAML and TOML.  # TODO: add INI and env.
+
+
+### Built on
+
+- [Pydantic](https://pydantic.dev/) - The typing foundation, model validators and serializers, type adapters.
+- [Pydantic Settings](https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/) - 
+- [anyconfig](https://github.com/ssato/python-anyconfig) - File serialization library with wide format support.

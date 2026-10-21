@@ -32,12 +32,12 @@ def declared_type(annotation: Any) -> Any:
     return annotation
 
 
-def type_name(declared: Any, fallback: str | None = None) -> str | None:
+def type_name(declared: Any) -> str | None:
     """The word for a declared type in a message: a named kind of value gives its own name
     (`APIType`, `Path`, a NewType, `int`); a container, a union, a `Literal`, `Any`, a
     TypeVar or another `typing` form gives `fallback`."""
     if declared in UNNAMEABLE or typing.get_origin(declared) is not None:
-        return fallback
+        return None
     if not isinstance(declared, (type, typing.NewType)):
-        return fallback  # a TypeVar, `Self`, `Never`, an instance in slot 0
-    return getattr(declared, "__name__", fallback)
+        return None  # a TypeVar, `Self`, `Never`, an instance in slot 0
+    return getattr(declared, "__name__", None)
