@@ -26,7 +26,7 @@ dependencies = [
     #  stamping entry names - so a minor cannot be trusted blind either;
     #  tests/test_pydantic_invariants.py is the upgrade gate, its tier labels
     #  say how to react.
-    "pydantic>=2.10,<3",
+    "pydantic>=2.10.6,<3",
     # Direct dependency: `sources.py` builds on pydantic-settings' source
     #  machinery (`PydanticBaseSettingsSource`), and the CLI parsing contract
     #  (`CliSettingsSource`, `cli_shortcuts`, `cli_implicit_flags`) is its API

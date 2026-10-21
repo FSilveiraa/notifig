@@ -33,7 +33,7 @@ jobs:
         include:
           - posture: floor
             python-version: "3.13"
-            constraints: "-c constraints/floor.txt"
+            constraints: "-c tests/version_floors.txt"
           - posture: recommended
             python-version: "3.14"
             constraints: ""
