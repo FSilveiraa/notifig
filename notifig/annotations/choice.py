@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import operator
-import typing
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -11,14 +10,13 @@ from pydantic.fields import FieldInfo
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema, core_schema
 
+from notifig.utils import declared_type, type_name
 
-# `eq=False` is important to maintain. Without it, pydantic can try to derive __eq__/__hash__
-#  from fields (for caching on schema generation), and since `entries` is a Mapping it would
-#  raise on an unhashable dict. `eq=False` maintains identity through object.__hash__.
-@dataclass(frozen=True, slots=True, eq=False)
+
+@dataclass(frozen=True, slots=True)
 class Choice:
     entries: Mapping[str, Any]
-    # Optional reverse mapping: how to get the name from an entry
+    # TODO: review, consider repr or something and forcing callers to declare explicit key lambdas
     key: Callable[[Any], str] = operator.attrgetter("name")
     label: str = ""
 
@@ -38,11 +36,13 @@ class Choice:
         self, source: Any, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
         """Defines how to validate and serialize `source` using `handler`."""
-        args = typing.get_args(source)
-        member = next((a for a in args if a is not type(None)), source)
-        label = self.label or getattr(member, "__name__", "entry")
+        # Find the error label either from explicit setting
+        #  or the class name if it's not a built-in
+        if not (label := self.label):
+            label = type_name(declared_type(source)) or "choice"
 
-        def to_member(value):
+        # Converts an entry's name to its mapped value
+        def name_to_member(value):
             if not isinstance(value, str):
                 return value
             try:
@@ -52,23 +52,16 @@ class Choice:
                     f"Not a valid {label}. Use one of {self.options}"
                 ) from error
 
-        schema = core_schema.json_or_python_schema(
-            # On the wire an option is its name, so it validates as a string first.
-            json_schema=core_schema.chain_schema(
-                [
-                    core_schema.str_schema(),
-                    core_schema.no_info_plain_validator_function(to_member),
-                ]
-            ),
-            # In Python it is usually the member itself, sometimes still a name.
-            python_schema=core_schema.no_info_plain_validator_function(to_member),
-            # How pydantic serializes instances
+        # Create a schema from a before-validator function
+        return core_schema.no_info_before_validator_function(
+            name_to_member,   # The function to use over the schema
+            handler(source),  # The schema to use it on
             serialization=core_schema.plain_serializer_function_ser_schema(
-                self.key, return_schema=core_schema.str_schema(), when_used="json"
-            ),
+                self.key,  # How to get an entry's name
+                return_schema=core_schema.str_schema(),
+                when_used="json",
+            )
         )
-        # Whether None is legal is the annotation's to say.
-        return core_schema.nullable_schema(schema) if type(None) in args else schema
 
     def __get_pydantic_json_schema__(
         self, schema: dict[str, Any], handler: GetJsonSchemaHandler
