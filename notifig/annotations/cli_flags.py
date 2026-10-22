@@ -15,12 +15,15 @@ class CLIFlags:
     def __init__(self, flag: str | list[str], *flags: str) -> None:
         # NOTE: Not a real hack, this is the documented way to expose an alternative
         #  constructor with a frozen dataclass. The alternative is using `.of(*flags)`
-        if flag and flags:
+        if isinstance(flag, str):
+            all_flags = (flag, *flags)
+        elif flags:
             raise ValueError(
-                "Specify flags either as a list (`CLIFlags([\"c\", \"config\"])`)"
-                "or several entries (`CLIFlags(\"c\", \"config\")`)"
+                'Specify flags either as a list (`CLIFlags(["c", "config"])`)'
+                'or several entries (`CLIFlags("c", "config")`)'
             )
-        all_flags = ([flag] if isinstance(flag, str) else flag) + list(flags)
+        else:
+            all_flags = tuple(flag)
         object.__setattr__(self, "flags", all_flags)
 
     def to_argparse(self) -> list[str]:
