@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from notifig.exceptions import FlagIsReserved
+
+# Flags that can't be reserved because they're owned by some library
+RESERVED_FLAGS = frozenset({
+    "h", "help"  # pydantic-settings uses argparse which reserves `-h/--help`
+})
+
 
 @dataclass(frozen=True, slots=True)
 class CLIFlags:
@@ -24,6 +31,8 @@ class CLIFlags:
             )
         else:
             all_flags = tuple(flag)
+        if reserved := [name for name in all_flags if name in RESERVED_FLAGS]:
+            raise FlagIsReserved(reserved)
         object.__setattr__(self, "flags", all_flags)
 
     def to_argparse(self) -> list[str]:
