@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "notifig"
-version = "0.1.0"
+version = "0.1.1"
 description = "Reactive typed configuration for Pydantic: a config tree that tells you what changed."
 readme = "README.md"
 license = {file = "LICENSE"}
