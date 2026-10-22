@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import operator
 import typing
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -17,13 +16,22 @@ from notifig.utils import declared_type, type_name
 @dataclass(frozen=True, slots=True)
 class Choice:
     entries: Mapping[str, Any]
-    # TODO: review, consider repr or something and forcing callers to declare explicit key lambdas
-    key: Callable[[Any], str] = operator.attrgetter("name")
     label: str = ""
 
     @property
     def options(self) -> list[str]:
         return sorted(self.entries)
+
+    def _name_for_entry(self, entry: Any) -> str:
+        """
+        Choice expects the entries Mapping to be mutable anytime, entries can
+        be added and removed, so the reverse mapping is built on-need.
+        """
+        for name, value in self.entries.items():
+            # NOTE: there's a reason we need both
+            if value is entry or value == entry:
+                return name
+        raise ValueError(f"{entry!r} is not one of {self.options!r}")
 
     def __get_pydantic_core_schema__(
         self, source: Any, handler: GetCoreSchemaHandler
@@ -50,7 +58,7 @@ class Choice:
             name_to_member,  # The function to use over the schema
             handler(source),  # The schema to use it on
             serialization=core_schema.plain_serializer_function_ser_schema(
-                self.key,  # How to get an entry's name
+                self._name_for_entry,  # How to get an entry's name
                 return_schema=core_schema.str_schema(),
                 when_used="json",
             ),

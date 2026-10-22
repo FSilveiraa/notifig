@@ -113,11 +113,6 @@ def test_a_choice_inside_a_list_writes_its_names_back():
     }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Choice.key defaults to attrgetter('name') (TODO in choice.py), so a "
-    "member without one cannot serialize",
-)
 def test_a_choice_over_members_without_a_name_writes_back():
     class Level(BaseModel):
         value: Annotated[int, Choice({"debug": 10, "info": 20})] = 20
