@@ -1,12 +1,12 @@
-"""The write contract: sync writers apply, notify, and hand back; plain
-assignment refuses atomically when an async observer is on the path.
+"""The write contract.
 
-The before/after that motivated the contract: a forgotten `await` used to lose
-the WRITE silently (a coroutine-never-awaited warning and nothing written).
-Now the value always lands when a sync writer is used, the dunders refuse
-BEFORE applying anything, and a no-op write never refuses — knowing what
-you're doing (segmenting async and sync parts of the tree) costs nothing.
+A sync writer applies, notifies, and hands the async observers back; plain
+assignment refuses BEFORE applying when an async observer is on the path, so a
+forgotten `await` can never lose the write silently. A write that changes
+nothing notifies nobody and therefore never refuses.
 """
+
+from __future__ import annotations
 
 import asyncio
 
@@ -23,6 +23,16 @@ def test_a_sync_write_applies_and_returns_nothing_pending():
     assert settings.api.model == "m"
 
 
+def test_set_takes_one_positional_pair_or_keywords_but_not_a_bare_path():
+    settings = make_settings()
+    settings.set("api.model", "m")
+    assert settings.api.model == "m"
+    settings.set(**{"api.model": "m2", "api.url": "https://other.test"})
+    assert (settings.api.model, settings.api.url) == ("m2", "https://other.test")
+    with pytest.raises(ValueError, match="exactly 2 or no positional"):
+        settings.set("api.model")
+
+
 def test_plain_assignment_refuses_before_applying_when_async_observers_reach():
     settings = make_settings()
     heard: list = []
@@ -34,18 +44,40 @@ def test_plain_assignment_refuses_before_applying_when_async_observers_reach():
     with pytest.raises(AsyncObserversNotCalled) as refused:
         settings.api.model = "unapplied"
 
-    # Nothing was applied, nobody was notified, and the exception says both.
     assert settings.api.model is None
     assert heard == []
     assert "hear" in str(refused.value)
     assert "Nothing was applied" in str(refused.value)
 
 
+def test_the_refusal_applies_to_the_dict_door_too():
+    settings = make_settings()
+    heard: list = []
+
+    @settings.on_change("api.model")
+    async def hear(_section, changes):
+        heard.extend(change.path for change in changes)
+
+    with pytest.raises(AsyncObserversNotCalled):
+        settings["api.model"] = "unapplied"
+    assert settings.api.model is None
+    assert heard == []
+    # The sync case lands where plain assignment puts it.
+    settings["api.url"] = "https://other.test"
+    assert settings.api.url == "https://other.test"
+
+
 def test_a_no_op_write_does_not_refuse_even_under_async_observers():
     settings = make_settings()
+    heard: list = []
+
+    @settings.on_change("api.url")
+    async def hear(_section, changes):
+        heard.extend(change.path for change in changes)
+
     settings.api.url = "https://example.test/v1"  # already the value
-    # An async observer is on the path, but the write changes nothing:
     assert settings.api.url == "https://example.test/v1"
+    assert heard == []
 
 
 def test_set_returns_the_async_coroutines_for_the_caller_to_run():
@@ -61,7 +93,7 @@ def test_set_returns_the_async_coroutines_for_the_caller_to_run():
     assert heard == []  # the async observer has not run
 
     async def run_pending():
-        for awaiting in pending:  # coroutines or futures: await works for both
+        for awaiting in pending:
             await awaiting
 
     asyncio.run(run_pending())
@@ -81,7 +113,7 @@ def test_set_and_wait_writes_and_runs_the_async_observer():
     assert heard == ["api.model"]
 
 
-def test_a_sync_observer_raising_does_not_undo_the_write():
+def test_a_raising_sync_observer_does_not_undo_the_write():
     settings = make_settings()
 
     @settings.on_change("api.url")
@@ -95,23 +127,40 @@ def test_a_sync_observer_raising_does_not_undo_the_write():
     assert settings.api.url == "https://other.test"  # applied
 
 
-def test_dotted_setitem_carries_the_plain_assignment_semantics():
-    """`section["api.url"] = v` is `section.api.url = v` down to the refusal:
-    an async observer on the path stops it before anything is applied."""
+def test_observers_are_isolated_from_each_others_failures():
     settings = make_settings()
     heard: list = []
 
-    @settings.on_change("api.model")
-    async def hear(_section, changes):
+    @settings.on_change("api.url")
+    def broken(_section, changes):
+        raise RuntimeError("first")
+
+    @settings.on_change("api.url")
+    def second(_section, changes):
         heard.extend(change.path for change in changes)
 
-    with pytest.raises(AsyncObserversNotCalled):
-        settings["api.model"] = "unapplied"
-    assert settings.api.model is None
-    assert heard == []
-    # and the sync case lands where plain assignment puts it
-    settings["api.url"] = "https://other.test"
-    assert settings.api.url == "https://other.test"
+    with pytest.raises(ExceptionGroup):
+        settings.api.url = "https://other.test"
+    assert heard == ["api.url"]
+
+
+def test_a_raising_async_observer_surfaces_from_set_and_wait():
+    settings = make_settings()
+
+    @settings.on_change("api.model")
+    async def broken(_section, changes):
+        raise RuntimeError("async failed")
+
+    with pytest.raises(ExceptionGroup) as raised:
+        asyncio.run(settings.set_and_wait(**{"api.model": "m"}))
+    assert "async failed" in str(raised.value.exceptions[0])
+    assert settings.api.model == "m"  # applied; the observer's failure is its own
+
+
+def test_a_declared_field_is_not_deletable(settings):
+    with pytest.raises(AttributeError, match="declared field"):
+        del settings.api.url
+    assert settings.api.url == "https://example.test/v1"
 
 
 def test_unset_removes_an_entry_with_a_deleted_notification(settings):
@@ -124,4 +173,15 @@ def test_unset_removes_an_entry_with_a_deleted_notification(settings):
 
     settings.plugins.unset("ghost")
     assert "ghost" not in dict(settings.plugins)
-    assert "Deleted" in heard
+    assert heard == ["Deleted"]
+
+
+def test_unset_refuses_while_an_async_observer_reaches_the_deletion(settings):
+    settings.plugins["ghost"] = {"enabled": True}
+
+    @settings.plugins.on_change()
+    async def hear(_section, changes): ...
+
+    with pytest.raises(AsyncObserversNotCalled):
+        del settings.plugins.ghost
+    assert settings.plugins["ghost"].enabled is True  # nothing was removed
