@@ -1,5 +1,3 @@
-from notifig import CommaSeparatedfrom dataclasses import Field
-
 # Notifig
 
 **A highly declarative, strictly typed, reactive config**
@@ -14,15 +12,16 @@ For example, this statement creates a `colors` field that only accepts certain v
 set both with comma-separated values (`--color "blue,red""`) or explicit lists: 
 
 ```python
+
 # Color type with restricted values
-ColorType = Choice(["red", "green", "blue"]) 
+ColorType = Choice({"red": , "green", "blue"}) 
 # List that can parse/serialize comma-delimited color names
 ColorList = CommaSeparated[ColorType]
 
 # List of colors with CLI flags
 colors: Annotated[
     ColorList,
-    CliFlags(["color", "c"]), # creates --color/-c CLI flags
+    CLIFlags(["color", "c"]), # creates --color/-c CLI flags
 ] = Field(
     default="green",          # default value
     description="...",        # info string for --help and CLI errors
@@ -65,8 +64,8 @@ Deleting or altering a field and all its flags only touches one statement, in a 
 
 ```python
 class Settings(Config):
-    foo: Annotated[str, CliFlags("foo", "f")] = Field(description="Value of Foo")
-    bar: Annotated[str|None, CliFlags("bar")] = Field(
+    foo: Annotated[str, CLIFlags("foo", "f")] = Field(description="Value of Foo")
+    bar: Annotated[str|None, CLIFlags("bar")] = Field(
         description="Name of Bar, if any",
         default=None,
     )
@@ -124,7 +123,7 @@ Requires Python ≥ 3.13.
 
 ### Features
 - **Custom annotations** - Notifig introduces several custom Pydantic annotations to express behavior from types:
-  - `CliFlags` - adds a shortcut CLI flag for a field
+  - `CLIFlags` - adds a shortcut CLI flag for a field
   - `Choice` - restricts the values a field can take according to a list of options
   - `CommaSeparated` - allows parsing a list delimited by `,`
   - `Link` - links one field to another through its full path 

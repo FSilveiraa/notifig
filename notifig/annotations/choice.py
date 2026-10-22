@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import operator
 import typing
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, Iterator, Annotated
+from typing import Annotated, Any
 
 from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
 from pydantic.fields import FieldInfo
@@ -47,13 +47,13 @@ class Choice:
 
         # Create a schema from a before-validator function
         return core_schema.no_info_before_validator_function(
-            name_to_member,   # The function to use over the schema
+            name_to_member,  # The function to use over the schema
             handler(source),  # The schema to use it on
             serialization=core_schema.plain_serializer_function_ser_schema(
                 self.key,  # How to get an entry's name
                 return_schema=core_schema.str_schema(),
                 when_used="json",
-            )
+            ),
         )
 
     def __get_pydantic_json_schema__(
@@ -75,10 +75,14 @@ class Choice:
         """
         if not field_info.metadata:
             return cls._get_choices_from_annotation(field_info.annotation)
-        return cls._get_choices_from_annotation(Annotated[field_info.annotation, *field_info.metadata])
+        return cls._get_choices_from_annotation(
+            Annotated[field_info.annotation, *field_info.metadata]
+        )
 
     @classmethod
-    def _get_choices_from_annotation(cls, annotation: Any) -> Iterator[tuple[Choice, Any]]:
+    def _get_choices_from_annotation(
+        cls, annotation: Any
+    ) -> Iterator[tuple[Choice, Any]]:
         """Gets all choices from the full type annotation."""
         for extra in getattr(annotation, "__metadata__", ()):
             if isinstance(extra, cls):
