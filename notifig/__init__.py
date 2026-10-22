@@ -17,7 +17,7 @@ from __future__ import annotations
 from .annotations import (
     AbsolutePath,
     Choice,
-    CliFlags,
+    CLIFlags,
     CommaSeparated,
     Link,
     Path,
@@ -42,7 +42,7 @@ __all__ = [
     "ConfigSection",
     "DynamicSection",
     "Choice",
-    "CliFlags",
+    "CLIFlags",
     "CommaSeparated",
     "Link",
     "Path",

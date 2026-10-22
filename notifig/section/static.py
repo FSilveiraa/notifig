@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, TypeIs, Union
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 from pydantic.fields import FieldInfo
 
-from ..annotations.cli_flags import CliFlags
+from ..annotations.cli_flags import CLIFlags
 from ..changes import ConfigChange, Created, Deleted, Updated
 from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound
 
@@ -392,7 +392,7 @@ class ConfigSection(BaseModel):
         return dumped[leaf]
 
     @classmethod
-    def _cli_flags_from_schema(cls, *paths) -> dict[str, list[CliFlags]]:
+    def _cli_flags_from_schema(cls, *paths) -> dict[str, list[CLIFlags]]:
         """
         Finds every `CliFlags` declared under this section, mapped by field path.
         :return Mapping of each field's path to its CLI shortcut flags.
@@ -404,14 +404,14 @@ class ConfigSection(BaseModel):
             if paths
             else cls.walk_schema("**")
         )
-        path_to_flags: dict[str, list[CliFlags]] = {}
+        path_to_flags: dict[str, list[CLIFlags]] = {}
         claimed_by: dict[str, str] = {}
         # A field excluded from exports can still declare CLI shortcuts
         for path, field_info in fields:
             all_cli_flags = [
                 flags
                 for flags in field_info.metadata
-                if isinstance(flags, CliFlags)
+                if isinstance(flags, CLIFlags)
                 # for flag in metadata.flags
             ]
             if not all_cli_flags:

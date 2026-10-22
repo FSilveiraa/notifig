@@ -3,17 +3,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-# `init=False` ensures the dataclass doesn't auto-generate an __init__.
-# Without it, we'd be forced to instantiate with `CliFlags(["-u", "--url"])`
-#  instead of `CliFlags("-u", "--url")`
-@dataclass(frozen=True, slots=True, init=False)
-class CliFlags:
+@dataclass(frozen=True, slots=True)
+class CLIFlags:
+    """
+    Represents the CLI flags for a section field.
+    Can be set both with `CLIFlags(*flags)` or `CLIFlags([flag, ...])`.
+    """
+
     flags: tuple[str, ...]
 
-    def __init__(self, *flags) -> None:
+    def __init__(self, flag: str | list[str], *flags: str) -> None:
         # NOTE: Not a real hack, this is the documented way to expose an alternative
         #  constructor with a frozen dataclass. The alternative is using `.of(*flags)`
-        object.__setattr__(self, "flags", flags)
+        if flag and flags:
+            raise ValueError(
+                "Specify flags either as a list (`CLIFlags([\"c\", \"config\"])`)"
+                "or several entries (`CLIFlags(\"c\", \"config\")`)"
+            )
+        all_flags = ([flag] if isinstance(flag, str) else flag) + list(flags)
+        object.__setattr__(self, "flags", all_flags)
 
     def to_argparse(self) -> list[str]:
         return [
