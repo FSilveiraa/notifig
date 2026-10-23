@@ -12,19 +12,31 @@ For example, this statement creates a `colors` field that only accepts certain v
 set both with comma-separated values (`--color "blue,red""`) or explicit lists: 
 
 ```python
+from enum import Enum
+from typing import Annotated
+from pydantic import Field
+from notifig import Choice, Delimited, CLIFlags
+
+
+class Color(Enum):
+    RED = "#FF0000"
+    GREEN = "#00FF00"
+    BLUE = "#0000FF"
+
+COLORS = {name.lower(): color for name, color in Color.__members__.items()}
 
 # Color type with restricted values
-ColorType = Choice({"red": , "green", "blue"}) 
-# List that can parse/serialize comma-delimited color names
-ColorList = CommaSeparated[ColorType]
-
+ColorType = Annotated[Color, Choice(COLORS)]
+# List that can parse/serialize delimited color names (comma by default)
+ColorList = Annotated[list[ColorType], Delimited()]
 # List of colors with CLI flags
 colors: Annotated[
     ColorList,
-    CLIFlags(["color", "c"]), # creates --color/-c CLI flags
+    CLIFlags(["color", "c"]),  # creates --color/-c CLI flags
 ] = Field(
-    default="green",          # default value
-    description="...",        # info string for --help and CLI errors
+    default="green",  # default value
+    # info string for --help and CLI errors
+    description="Available colors",
 )
 
 # Usage
@@ -90,24 +102,35 @@ An observer is a callable or coroutine registered to a path, and it's called whe
 A simple example where changing a UI's theme causes it to redraw:
 
 ```python
+from typing import Annotated
+from pydantic import Field
+from notifig import Config, ConfigSection, ConfigChange, Choice
+
 class UIConfig(ConfigSection):
-    theme: Annotated[Choices(["dark", "light"])] = Field(default="light")
+    theme: Annotated[str, Choice(["dark", "light"])] = Field(default="light")
 
 class Settings(Config):
-    ui: UIConfig
+    ui: UIConfig = Field(default_factory=UIConfig)
 
 config = Settings()
 
 # sync observer that logs every change
 @config.on_change()
-def print_changes(section: ConfigSection, changes: tuple[Change]):
+def print_changes(section: ConfigSection, changes: tuple[ConfigChange]):
     for change in changes:
         print(f"Change of type {change.__class__.__name__} on {change.path}")
 
-# async observer
+# Simple assignment works for sync observers
+config.ui.theme = "dark"
+config.ui.theme = "light"
+        
+# async observer that redraws UI theme
 @config.on_change("ui.theme")
-async def redraw_theme(section: ConfigSection, changes: tuple[Change]):
+async def redraw_theme(section: ConfigSection, changes: tuple[ConfigChange]):
     await interface.update_theme(section.ui.theme)
+
+# Async observers require `await` to be called
+await config.ui.set_and_wait(theme="dark")
 ```
 </details>
 
@@ -130,7 +153,7 @@ Requires Python ≥ 3.13.
 - **Observers** - 
 - Static and Dynamic sections
 - Obvious usage - `bar = section.foo`, `section["foo"] = "baz"`, `section.get("foo.bar")`, `for name, field in section`
-- File formats: supports parsing and serializing config files using JSON, YAML and TOML.  # TODO: add INI and env.
+- File formats: supports config files in JSON, YAML, TOML, INI and .env
 
 
 ### Built on

@@ -161,6 +161,56 @@ def test_a_choice_over_members_without_a_name_writes_back():
     assert Level(value=20).model_dump(mode="json") == {"value": "info"}
 
 
+def test_a_choice_over_a_sequence_names_each_item_after_itself():
+    choice = Choice(["dark", "light"])
+    assert choice.entries == {"dark": "dark", "light": "light"}
+    assert choice.options == ["dark", "light"]
+
+
+def test_a_sequence_backed_choice_validates_a_name():
+    adapter = TypeAdapter(Annotated[str, Choice(["dark", "light"])])
+
+    assert adapter.validate_python("dark") == "dark"
+    with pytest.raises(ValidationError, match=r"Use one of \['dark', 'light'\]"):
+        adapter.validate_python("purple")
+
+
+def test_a_non_string_item_is_named_by_its_string_form():
+    assert Choice([1, 2]).entries == {"1": 1, "2": 2}
+
+
+def test_a_single_string_is_not_a_sequence_of_choices():
+    with pytest.raises(TypeError, match="not a string"):
+        Choice("oops")
+
+
+def test_a_choice_takes_a_label_for_its_errors():
+    adapter = TypeAdapter(Annotated[str, Choice(["a"], label="Colour")])
+
+    with pytest.raises(ValidationError, match="Not a valid Colour"):
+        adapter.validate_python("z")
+
+
+def test_a_mapping_backed_choice_sees_entries_added_after_construction():
+    """The mapping is held, not copied: an entry added later is live."""
+    entries = {"a": "a"}
+    choice = Choice(entries)
+
+    entries["b"] = "b"
+
+    assert choice.options == ["a", "b"]
+
+
+def test_a_sequence_backed_choice_copies_its_items():
+    """A sequence is read once, so the mapping is the choice's own."""
+    values = ["a"]
+    choice = Choice(values)
+
+    values.append("b")
+
+    assert choice.options == ["a"]
+
+
 def test_choice_of_finds_the_choice_through_each_annotation_shape():
     class Flat(BaseModel):
         one: BackendChoice = BACKENDS["memory"]

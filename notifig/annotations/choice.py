@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -13,10 +13,20 @@ from pydantic_core import CoreSchema, core_schema
 from notifig.utils import declared_type, type_name
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True, init=False)
 class Choice:
     entries: Mapping[str, Any]
-    label: str = ""
+    label: str
+
+    def __init__(self, entries: Mapping[str, Any] | Sequence[str], label: str = ""):
+        if isinstance(entries, str):
+            raise TypeError("Choice takes a mapping or sequence, not a string")
+        self.entries = (
+            entries
+            if isinstance(entries, Mapping)
+            else {str(item): item for item in entries}
+        )
+        self.label = label
 
     @property
     def options(self) -> list[str]:
