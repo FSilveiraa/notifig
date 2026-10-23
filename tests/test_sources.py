@@ -68,6 +68,83 @@ def test_an_ini_file_is_read(tmp_path):
     assert Nested(config_files=[path], parse_cli=False).api.base_url == "from-ini"
 
 
+def test_dicts_are_merged_key_by_key_across_files(tmp_path):
+    low, high = write_files(
+        tmp_path,
+        **{
+            "low.yaml": "section:\n  a: from-low\n  b: from-low\n",
+            "high.yaml": "section:\n  b: from-high\n",
+        },
+    )
+
+    class Nested(Config):
+        section: dict[str, str] = {}
+
+    merged = Nested(config_files=[low, high], parse_cli=False).section
+    assert merged == {"a": "from-low", "b": "from-high"}
+
+
+def test_a_list_from_a_later_file_replaces_by_default(tmp_path):
+    low, high = write_files(
+        tmp_path,
+        **{
+            "low.yaml": "tags:\n  - one\n  - two\n",
+            "high.yaml": "tags:\n  - three\n",
+        },
+    )
+
+    class Listed(Config):
+        tags: list[str] = []
+
+    assert Listed(config_files=[low, high], parse_cli=False).tags == ["three"]
+
+
+def test_lists_from_a_later_file_are_appended_when_asked(tmp_path):
+    low, high = write_files(
+        tmp_path,
+        **{
+            "low.yaml": "tags:\n  - one\n  - two\n",
+            "high.yaml": "tags:\n  - three\n",
+        },
+    )
+
+    class Listed(Config):
+        model_config = ConfigDict(merge_lists_in_files=True)
+        tags: list[str] = []
+
+    assert Listed(config_files=[low, high], parse_cli=False).tags == [
+        "one",
+        "two",
+        "three",
+    ]
+
+
+def test_a_merged_list_keeps_repeats_unless_asked_for_unique(tmp_path):
+    low, high = write_files(
+        tmp_path,
+        **{
+            "low.yaml": "tags:\n  - shared\n",
+            "high.yaml": "tags:\n  - shared\n  - extra\n",
+        },
+    )
+
+    class Repeated(Config):
+        model_config = ConfigDict(merge_lists_in_files=True)
+        tags: list[str] = []
+
+    assert Repeated(config_files=[low, high], parse_cli=False).tags == [
+        "shared",
+        "shared",
+        "extra",
+    ]
+
+    class Unique(Config):
+        model_config = ConfigDict(merge_lists_in_files=True, merge_lists_unique=True)
+        tags: list[str] = []
+
+    assert Unique(config_files=[low, high], parse_cli=False).tags == ["shared", "extra"]
+
+
 def test_a_dotenv_file_is_read_without_naming_it(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("API_URL=from-dotenv\n")
     monkeypatch.chdir(tmp_path)

@@ -17,3 +17,12 @@ class ConfigDict(SettingsConfigDict, total=False):
 
     # Config files read when no source names any; each is read only if it exists
     default_config_files: list[str | PathLike]
+
+    # Whether a list named in several config files is appended to, or replaced by
+    # the later file's value. Off by default.
+    # NOTE: dicts always merge key by key.
+    merge_lists_in_files: bool
+
+    # Whether a merged list drops repeats (keeping the first sighting). Only
+    # consulted when `merge_lists_in_files` is on.
+    merge_lists_unique: bool
