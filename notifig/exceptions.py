@@ -80,6 +80,6 @@ class FlagIsReserved(ValueError):
 
     def __init__(self, flags: Sequence[str]):
         super().__init__(
-            f"'{",".join(flags)}' {"are" if len(flags) > 1 else "is"}"
+            f"'{','.join(flags)}' {'are' if len(flags) > 1 else 'is'}"
             f"reserved by the CLI parser and can't be used as flags."
         )

@@ -12,7 +12,7 @@ import pytest
 
 from notifig import Config, ConfigDict
 
-from .conftest import cli_list_values_need_ps_211, set_argv, write_files
+from .conftest import set_argv, write_files
 
 
 class Settings(Config):
@@ -99,7 +99,6 @@ def test_cli_overrides_env_which_overrides_files(tmp_path, monkeypatch):
     assert Settings(config_files=[path], api_url="from-code").api_url == "from-code"
 
 
-@cli_list_values_need_ps_211
 def test_config_files_can_be_named_on_the_command_line(tmp_path, monkeypatch):
     (path,) = write_files(tmp_path, **{"conf.toml": 'api_url = "from-cli-file"\n'})
     set_argv(monkeypatch, "--config-files", path)

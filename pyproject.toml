@@ -27,11 +27,9 @@ dependencies = [
     #  tests/test_pydantic_invariants.py is the upgrade gate, its tier labels
     #  say how to react.
     "pydantic>=2.10.6,<3",
-    # Direct dependency: `sources.py` builds on pydantic-settings' source
-    #  machinery (`PydanticBaseSettingsSource`), and the CLI parsing contract
-    #  (`CliSettingsSource`, `cli_shortcuts`, `cli_implicit_flags`) is its API
-    #  too. Same floor/ceiling rule as pydantic.
-    "pydantic-settings>=2.10.0,<3",
+    # 2.11 is the oldest version that supports NoDecode on CLI values
+    # NOTE: update floor to 2.16.2 once it releases with GroupedMetadata fixed
+    "pydantic-settings>=2.11.0,<3",
     # File sources (`sources.py`) load and merge through anyconfig. The surface
     #  used is two functions and a merge strategy constant, stable across its
     #  history (the suite passes against 0.14.x as well) - a floor, no ceiling.
@@ -41,6 +39,8 @@ dependencies = [
     #  format the library claims, so the parsers are direct dependencies.
     "pyyaml>=6.0.3",
     "toml>=0.10.2",
+    # We only need 0.4.0 for GroupedMetadata, but pydantic 2.10.6 requires 0.6.0
+    "annotated-types>=0.6.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

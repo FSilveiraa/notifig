@@ -13,14 +13,15 @@ from typing import Annotated, ClassVar
 
 import pytest
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic_settings import NoDecode
 
 from notifig import (
     AbsolutePath,
     Choice,
     CLIFlags,
-    CommaSeparated,
     Config,
     ConfigSection,
+    Delimited,
     Link,
     PathPattern,
 )
@@ -41,21 +42,60 @@ def test_cli_flags_refuses_mixing_the_two_shapes():
         CLIFlags(["c"], "config")
 
 
-# --- CommaSeparated -----------------------------------------------------------
+# --- Delimited ----------------------------------------------------------------
 
 
-def test_comma_separated_splits_strips_and_drops_empties():
-    adapter = TypeAdapter(CommaSeparated[str])
+def test_a_delimited_field_splits_strips_and_drops_empties():
+    adapter = TypeAdapter(Annotated[list[str], Delimited()])
     assert adapter.validate_python(" a, bb ,,c,") == ["a", "bb", "c"]
     assert adapter.validate_python("") == []
     assert adapter.validate_python(["a"]) == ["a"]  # a real list passes through
 
 
-def test_comma_separated_writes_back_one_string():
+def test_a_delimited_field_writes_back_one_string():
     class Holder(BaseModel):
-        tags: CommaSeparated[str] = []
+        tags: Annotated[list[str], Delimited()] = []
 
     assert Holder(tags=["a", "b"]).model_dump(mode="json") == {"tags": "a,b"}
+
+
+def test_another_delimiter_splits_and_joins_with_itself():
+    class Search(BaseModel):
+        terms: Annotated[list[str], Delimited(";")] = []
+
+    parsed = Search(terms="a; b; c")
+    assert parsed.terms == ["a", "b", "c"]
+    assert parsed.model_dump(mode="json") == {"terms": "a;b;c"}
+
+
+def test_a_delimited_field_keeps_its_own_item_type():
+    """The item type decides both directions: `AbsolutePath` expands on the way
+    in and writes back the path it resolved to."""
+
+    class Paths(BaseModel):
+        roots: Annotated[list[AbsolutePath], Delimited(":")] = []
+
+    parsed = Paths(roots="~/one:/two")
+    assert [path.name for path in parsed.roots] == ["one", "two"]
+    assert parsed.model_dump(mode="json") == {
+        "roots": f"{pathlib.Path.home()}/one:/two"
+    }
+
+
+def test_an_empty_delimiter_is_refused():
+    with pytest.raises(ValueError, match="cannot be empty"):
+        Delimited("")
+
+
+def test_a_delimited_field_takes_a_comma_string_from_the_environment(monkeypatch):
+    """A delimited field is read from env as text, not JSON: the "don't decode"
+    marker travels inside `Delimited`, so no field has to name it."""
+
+    class Env(Config):
+        tags: Annotated[list[str], NoDecode, Delimited()] = []
+
+    monkeypatch.setenv("TAGS", "a,b")
+    assert Env(parse_cli=False).tags == ["a", "b"]
 
 
 # --- Choice -------------------------------------------------------------------
@@ -91,22 +131,23 @@ def test_choice_writes_the_name_back():
     assert Client(backend="redis").model_dump(mode="json") == {"backend": "redis"}
 
 
-def test_choice_composes_inside_a_comma_separated_list():
+def test_choice_composes_inside_a_delimited_list():
     class Multi(BaseModel):
-        backends: CommaSeparated[Annotated[Backend, Choice(BACKENDS)]] = []
+        backends: Annotated[
+            list[Annotated[Backend, Choice(BACKENDS)]], Delimited()
+        ] = []
 
     multi = Multi(backends="memory,redis")
     assert multi.backends == [BACKENDS["memory"], BACKENDS["redis"]]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="CommaSeparated's join stringifies items with str(), so an item-level "
-    "serializer (Choice's) never runs",
-)
 def test_a_choice_inside_a_list_writes_its_names_back():
+    """The item's own writer produces each token, not `str()` of the object."""
+
     class Multi(BaseModel):
-        backends: CommaSeparated[Annotated[Backend, Choice(BACKENDS)]] = []
+        backends: Annotated[
+            list[Annotated[Backend, Choice(BACKENDS)]], Delimited()
+        ] = []
 
     assert Multi(backends="memory,redis").model_dump(mode="json") == {
         "backends": "memory,redis"
@@ -125,8 +166,8 @@ def test_choice_of_finds_the_choice_through_each_annotation_shape():
         one: BackendChoice = BACKENDS["memory"]
 
     class Nested(BaseModel):
-        many: CommaSeparated[Annotated[Backend, Choice(BACKENDS)]] = Field(
-            default_factory=list
+        many: Annotated[list[Annotated[Backend, Choice(BACKENDS)]], Delimited()] = (
+            Field(default_factory=list)
         )
 
     class Optional(BaseModel):

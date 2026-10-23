@@ -1,13 +1,13 @@
 from .choice import Choice
 from .cli_flags import CLIFlags
-from .comma_list import CommaSeparated
+from .delimited import Delimited
 from .link import Link
 from .path import AbsolutePath, Path, PathPattern
 
 __all__ = [
     "Choice",
     "CLIFlags",
-    "CommaSeparated",
+    "Delimited",
     "Link",
     "Path",
     "AbsolutePath",

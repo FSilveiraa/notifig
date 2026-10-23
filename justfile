@@ -3,7 +3,7 @@
 # Paths for lint/format/check: the package and its tests.
 src := "notifig/ tests/"
 
-# Auto-format code (pass extra flags, e.g. `just format --check`)
+# Auto-format code in place (pass extra flags, e.g. `just format notifig/config.py`)
 format *flags:
     ruff format {{src}} {{flags}}
 
@@ -19,5 +19,5 @@ check *flags:
 test *flags:
     pytest --cov=notifig --cov-report=term-missing {{flags}}
 
-# Run the full CI suite: format, static checks (lint + mypy), test
-ci: format check test
+# Run the full CI suite: formatting (read-only), static checks (lint + mypy), test
+ci: (format "--check") check test

@@ -12,16 +12,16 @@ from typing import Annotated
 import pytest
 from pydantic import Field
 
-from notifig import CLIFlags, CommaSeparated, Config, ConfigSection
+from notifig import CLIFlags, Config, ConfigSection, Delimited
 
-from .conftest import cli_list_values_need_ps_211, set_argv
+from .conftest import set_argv
 
 
 class Cli(Config):
     port: Annotated[int, CLIFlags("p", "port")] = 8000
     name: str = "unnamed"
     enabled: bool = False
-    tags: CommaSeparated[str] = []
+    tags: Annotated[list[str], Delimited()] = []
 
 
 def test_a_declared_shortcut_is_one_dash_or_two(monkeypatch):
@@ -43,7 +43,6 @@ def test_booleans_are_implicit_flags(monkeypatch):
     assert Cli().enabled is False
 
 
-@cli_list_values_need_ps_211
 def test_a_comma_separated_field_takes_one_flag(monkeypatch):
     set_argv(monkeypatch, "--tags", "a,b")
     assert Cli().tags == ["a", "b"]

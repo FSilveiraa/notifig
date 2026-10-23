@@ -1,10 +1,15 @@
 import sys
-from typing import override
+from typing import Annotated, override
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, CliSettingsSource
+from pydantic_settings import (
+    BaseSettings,
+    CliSettingsSource,
+    NoDecode,
+    PydanticBaseSettingsSource,
+)
 
-from .annotations import AbsolutePath, CommaSeparated
+from .annotations import AbsolutePath, Delimited
 from .meta import ConfigDict
 from .section.static import ConfigSection
 from .sources import ConfigFileSource
@@ -25,7 +30,8 @@ class Config(BaseSettings, ConfigSection):
     # Config file paths read, sorted lowest -> highest priority.
     # Add flags and defaults for this field using:
     #  `ConfigDict(cli_shortcuts={"config_files":["c", "config"]}, default_config_files=["~/config.json"])`
-    config_files: CommaSeparated[AbsolutePath] = Field(
+    # NOTE: Remove NoDecode once pydantic-settings PR lands
+    config_files: Annotated[list[AbsolutePath], NoDecode, Delimited()] = Field(
         default_factory=list, exclude=True
     )
 
@@ -38,7 +44,7 @@ class Config(BaseSettings, ConfigSection):
         env_settings,
         dotenv_settings,
         file_secret_settings,
-    ):
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
         """Build the settings-source stack. CLI args flow through `cli_parse_args`;
         `--config` flags are split out for ConfigFileSource."""
         # Parse CLI args list. If `parse_cli` is absent from init_kwargs,

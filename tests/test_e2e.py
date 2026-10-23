@@ -17,11 +17,11 @@ from pydantic import Field
 from notifig import (
     Choice,
     CLIFlags,
-    CommaSeparated,
     Config,
     ConfigDict,
     ConfigSection,
     Deleted,
+    Delimited,
     Link,
     Updated,
 )
@@ -31,7 +31,6 @@ from notifig.sources import save_config
 from .conftest import (
     EntryConfig,
     TypedEntry,
-    cli_list_values_need_ps_211,
     set_argv,
     write_files,
 )
@@ -50,7 +49,7 @@ class Api(ConfigSection):
     port: Annotated[int, CLIFlags("p", "port")] = 8000
     backend: Annotated[Backend, Choice(BACKENDS)] = BACKENDS["memory"]
     model: str | None = None
-    origins: CommaSeparated[str] = Field(default_factory=list)
+    origins: Annotated[list[str], Delimited()] = Field(default_factory=list)
 
 
 class Webhooks(ConfigSection):
@@ -123,7 +122,6 @@ def test_every_source_layers_in_its_documented_order(tmp_path, monkeypatch):
     assert settings.plugins["beta"].enabled is True
 
 
-@cli_list_values_need_ps_211
 def test_a_comma_separated_field_can_come_from_the_command_line(tmp_path, monkeypatch):
     settings = build(
         tmp_path,

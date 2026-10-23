@@ -5,9 +5,13 @@ from dataclasses import dataclass
 from notifig.exceptions import FlagIsReserved
 
 # Flags that can't be reserved because they're owned by some library
-RESERVED_FLAGS = frozenset({
-    "h", "help"  # pydantic-settings uses argparse which reserves `-h/--help`
-})
+RESERVED_FLAGS = frozenset(
+    {
+        # pydantic-settings uses argparse which reserves `-h/--help`
+        "h",
+        "help",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)

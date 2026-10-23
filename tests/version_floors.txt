@@ -1,15 +1,8 @@
-# The floor of every ranged dependency, as one pip constraints file. The CI
-# "floor" leg installs the package against exactly these; the latest leg
-# installs without it. If a test fails only under one leg, the range is lying
-# about what the library supports - widen the code or narrow the range.
-#
-# These floors are a SUPPORT POLICY (roughly the last two years of pydantic
-# 2.x), not the empirical breaking point: the full suite bisects clean down
-# to pydantic 2.0.3, and pydantic-settings is the real boundary - below
-# 2.10.0 its CliSettingsSource does not know `cli_shortcuts`. Re-bisect after
-# any internals change; one throwaway venv per candidate is the whole method.
+# Lowest version of each relevant library that passes CI
+
 pydantic==2.10.6
-pydantic-settings==2.10.0
+pydantic-settings==2.11.0
+annotated-types==0.6.0
 anyconfig==0.15.1
 pyyaml==6.0.3
 toml==0.10.2

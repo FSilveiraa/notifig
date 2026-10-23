@@ -8,7 +8,7 @@ on:
 # Three jobs, three postures:
 #
 # - floor:       the oldest Python supported + the oldest dependency versions
-#                the ranges claim (constraints/floor.txt). Proves the ranges
+#                the ranges claim (tests/version_floors.txt). Proves the ranges
 #                are honest. Named - changing it is a support decision.
 # - recommended: the Python this project tells users to run, with today's
 #                dependencies. What `pip install notifig` gives a user today.

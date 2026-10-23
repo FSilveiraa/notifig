@@ -11,24 +11,10 @@ import sys
 from pathlib import Path
 from typing import ClassVar
 
-import pydantic_settings
 import pytest
 
 from notifig import Config, ConfigSection
 from notifig.section.dynamic import DynamicSection
-
-# pydantic-settings < 2.11 hands a `NoDecode` list field its CLI value
-# JSON-encoded, so `--tags a,b` reaches the field as '["a", "b"]'. Bisected:
-# 2.10.0 and 2.10.1 are affected, 2.11.0 is not. The declared floor is still
-# 2.10, so those tests are skipped there rather than silently weakened.
-_SETTINGS_VERSION = tuple(
-    int(part) for part in pydantic_settings.__version__.split(".")[:2]
-)
-cli_list_values_need_ps_211 = pytest.mark.skipif(
-    _SETTINGS_VERSION < (2, 11),
-    reason="pydantic-settings < 2.11 JSON-encodes a NoDecode list's CLI value; "
-    "raise the pydantic-settings floor to 2.11 to run this",
-)
 
 
 class EntryConfig(ConfigSection):
