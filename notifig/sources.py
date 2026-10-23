@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 from .meta import ConfigDict
 
-FILE_EXTENSIONS: tuple[str, ...] = ("json", "yaml", "yml", "toml")
+FILE_EXTENSIONS: tuple[str, ...] = ("json", "yaml", "yml", "toml", "ini")
 
 
 def load_and_merge_configs(paths_low_to_high: Sequence[str | PathLike]) -> dict:

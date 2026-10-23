@@ -9,8 +9,9 @@ skipped rather than fatal.
 from __future__ import annotations
 
 import pytest
+from pydantic import Field
 
-from notifig import Config, ConfigDict
+from notifig import Config, ConfigDict, ConfigSection
 
 from .conftest import set_argv, write_files
 
@@ -33,17 +34,83 @@ def test_later_files_win_and_earlier_keys_survive(tmp_path):
     assert settings.feature == "from-global"  # earlier key survives the merge
 
 
-@pytest.mark.parametrize(
-    ("name", "content", "expected"),
-    [
-        ("conf.json", '{"api_url": "from-json"}', "from-json"),
-        ("conf.yaml", "api_url: from-yaml\n", "from-yaml"),
-        ("conf.toml", 'api_url = "from-toml"\n', "from-toml"),
-    ],
-)
-def test_the_supported_formats_are_read_the_same_way(tmp_path, name, content, expected):
-    (path,) = write_files(tmp_path, **{name: content})
-    assert Settings(config_files=[path], parse_cli=False).api_url == expected
+def test_a_json_file_is_read(tmp_path):
+    (path,) = write_files(tmp_path, **{"conf.json": '{"api_url": "from-json"}'})
+    assert Settings(config_files=[path], parse_cli=False).api_url == "from-json"
+
+
+def test_a_yaml_file_is_read(tmp_path):
+    (path,) = write_files(tmp_path, **{"conf.yaml": "api_url: from-yaml\n"})
+    assert Settings(config_files=[path], parse_cli=False).api_url == "from-yaml"
+
+
+def test_a_yml_file_is_read(tmp_path):
+    (path,) = write_files(tmp_path, **{"conf.yml": "api_url: from-yml\n"})
+    assert Settings(config_files=[path], parse_cli=False).api_url == "from-yml"
+
+
+def test_a_toml_file_is_read(tmp_path):
+    (path,) = write_files(tmp_path, **{"conf.toml": 'api_url = "from-toml"\n'})
+    assert Settings(config_files=[path], parse_cli=False).api_url == "from-toml"
+
+
+def test_an_ini_file_is_read(tmp_path):
+    """INI has no flat form: every value sits under a section header, so the file
+    feeds a section-shaped config rather than a top-level field."""
+
+    class Api(ConfigSection):
+        base_url: str = "unset"
+
+    class Nested(Config):
+        api: Api = Field(default_factory=Api)
+
+    (path,) = write_files(tmp_path, **{"conf.ini": "[api]\nbase_url = from-ini\n"})
+    assert Nested(config_files=[path], parse_cli=False).api.base_url == "from-ini"
+
+
+def test_a_dotenv_file_is_read_without_naming_it(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("API_URL=from-dotenv\n")
+    monkeypatch.chdir(tmp_path)
+    assert Settings(parse_cli=False).api_url == "from-dotenv"
+
+
+def test_a_real_env_var_beats_the_dotenv_file(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("API_URL=from-dotenv\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("API_URL", "from-env")
+    assert Settings(parse_cli=False).api_url == "from-env"
+
+
+def test_a_dotenv_file_beats_a_config_file(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("API_URL=from-dotenv\n")
+    (path,) = write_files(tmp_path, **{"conf.yaml": "api_url: from-file\n"})
+    monkeypatch.chdir(tmp_path)
+    assert Settings(config_files=[path], parse_cli=False).api_url == "from-dotenv"
+
+
+def test_a_subclass_config_does_not_drop_the_default_dotenv(tmp_path, monkeypatch):
+    """A subclass naming its own `model_config` inherits the parent's keys, so the
+    `.env` default survives -- only naming `env_file` changes it."""
+
+    (tmp_path / ".env").write_text("APP_API_URL=from-dotenv\n")
+    monkeypatch.chdir(tmp_path)
+
+    class Prefixed(Config):
+        model_config = ConfigDict(env_prefix="APP_")
+        api_url: str = "unset"
+
+    assert Prefixed(parse_cli=False).api_url == "from-dotenv"
+
+
+def test_env_file_none_turns_the_dotenv_off(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("API_URL=from-dotenv\n")
+    monkeypatch.chdir(tmp_path)
+
+    class NoDotEnv(Config):
+        model_config = ConfigDict(env_file=None)
+        api_url: str = "unset"
+
+    assert NoDotEnv(parse_cli=False).api_url == "unset"
 
 
 def test_an_explicitly_missing_config_file_raises(tmp_path):

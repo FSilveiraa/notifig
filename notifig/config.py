@@ -23,6 +23,10 @@ class Config(BaseSettings, ConfigSection):
         cli_implicit_flags=True,
         cli_enforce_required=False,
         default_config_files=[],
+        # NOTE: `.env` is picked up by default, pass `env_file=None` to disable.
+        # Reasoning: A `.env` is the one file expected to be picked up by default
+        #  on any system.
+        env_file=".env",
     )
 
     # Whether to read `sys.argv`. An internal switch, never saved or edited
@@ -91,5 +95,6 @@ class Config(BaseSettings, ConfigSection):
                 cli_shortcuts=shortcuts,
             ),
             env_settings,
+            dotenv_settings,
             ConfigFileSource(settings_cls),
         )
