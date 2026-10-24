@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import types
 import typing
+from pathlib import Path
 from types import UnionType
 from typing import Any, Union
 
@@ -64,3 +65,7 @@ def unwrap_optional(_type: type | FieldInfo) -> tuple[bool, Any]:
         if len(non_none) == 1:
             return (True, non_none[0])
     return (False, annotation)
+
+
+def absolute_path(value: Any) -> Path:
+    return Path(value).expanduser().resolve()

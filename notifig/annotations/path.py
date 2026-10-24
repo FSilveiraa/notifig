@@ -5,6 +5,8 @@ from typing import Annotated
 
 from pydantic import BeforeValidator, PlainSerializer
 
+from notifig.utils import absolute_path
+
 Path = Annotated[
     pathlib.Path,
     BeforeValidator(lambda value: pathlib.Path(value)),
@@ -13,7 +15,7 @@ Path = Annotated[
 
 AbsolutePath = Annotated[
     pathlib.Path,
-    BeforeValidator(lambda value: pathlib.Path(value).expanduser().resolve()),
+    BeforeValidator(lambda value: absolute_path(value)),
     PlainSerializer(str, return_type=str, when_used="json"),
 ]
 
@@ -23,7 +25,7 @@ def _resolve_pattern(value) -> pathlib.Path:
     # Don't expand bare names, unlike AbsolutePath
     if str(path) == path.name:
         return path
-    return path.expanduser().resolve()
+    return absolute_path(value)
 
 
 PathPattern = Annotated[

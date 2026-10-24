@@ -1,6 +1,6 @@
 import sys
 from os import PathLike
-from typing import Annotated, override
+from typing import Annotated, override, Any
 
 from pydantic import Field
 from pydantic_settings import (
@@ -10,6 +10,7 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
 )
 
+from .changes import ConfigChange
 from .annotations import AbsolutePath, Delimited
 from .meta import ConfigDict
 from .section.static import ConfigSection
@@ -32,6 +33,13 @@ class Config(BaseSettings, ConfigSection):
 
     # Whether to read `sys.argv`. An internal switch, never saved or edited
     parse_cli: bool = Field(default=True, exclude=True)
+
+    # Whether to auto-save the config on every change
+    auto_save: bool = Field(
+        default=False,
+        description="Automatically save config to the latest file",
+    )
+
     # Config file paths read, sorted lowest -> highest priority.
     # Add flags and defaults for this field using:
     #  `ConfigDict(cli_shortcuts={"config_files":["c", "config"]}, default_config_files=["~/config.json"])`
@@ -40,22 +48,21 @@ class Config(BaseSettings, ConfigSection):
         default_factory=list, exclude=True
     )
 
-    def save(self, path: str | PathLike | None = None, *, full: bool = False) -> None:
-        """
-        Write this config to `path`, or to the last file it was read from.
-        The config file is updated, never overwritten. It's read and parsed,
-        patched with the serialized config entries, and re-written.
+    @override
+    def model_post_init(self, context: Any) -> None:
+        super().model_post_init(context)
+        # Register an observer for auto-saving
+        @self.on_change()
+        def auto_save(section: ConfigSection, changes: tuple[ConfigChange, ...]) -> None:
+            """Saves the config changes if `auto_save==True`."""
+            if self.auto_save:
+                if not self.config_files:
+                    raise ValueError(
+                        "Cannot auto-save since no config file was read."
+                    )
+                path = self.config_files[-1]
 
-        With `full=True` the entire config is , otherwise only the
-        explicitly set entries are written.
-        """
-        target = path or (self.config_files[-1] if self.config_files else None)
-        if target is None:
-            raise ValueError(
-                "Can't save config: no path was given and "
-                "no config file was read"
-            )
-        save_config(self.model_dump(mode="json", exclude_unset=not full), target)
+
 
     @override
     @classmethod
@@ -116,3 +123,19 @@ class Config(BaseSettings, ConfigSection):
             dotenv_settings,
             ConfigFileSource(settings_cls),
         )
+
+
+    def save(self, path: str | PathLike | None = None, *, full: bool = False) -> None:
+        """
+        Write this config to `path`, or to the last file it was read from.
+
+        With `full=True` the entire config is , otherwise only the
+        explicitly set entries are written.
+        """
+        target = path or (self.config_files[-1] if self.config_files else None)
+        if target is None:
+            raise ValueError(
+                "Can't save config: no path was given and "
+                "no config file was read"
+            )
+        save_config(self.model_dump(mode="json", exclude_unset=not full), target)

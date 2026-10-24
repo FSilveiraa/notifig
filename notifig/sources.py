@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pathlib
 from collections.abc import Sequence
 from os import PathLike
 from typing import Any
@@ -10,6 +9,7 @@ from pydantic import TypeAdapter
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 from .meta import ConfigDict
+from .utils import absolute_path
 
 FILE_EXTENSIONS: tuple[str, ...] = ("json", "yaml", "yml", "toml", "ini")
 
@@ -32,12 +32,12 @@ def _merge_lists(low: list, high: list, *, unique: bool) -> list:
     return deduped
 
 
-def _merge(low: Any, high: Any, *, merge_lists: bool, merge_lists_unique: bool) -> Any:
+def _merge_configs(low: Any, high: Any, *, merge_lists: bool, merge_lists_unique: bool = False) -> Any:
     if isinstance(low, dict) and isinstance(high, dict):
         merged = dict(low)
         for key, value in high.items():
             merged[key] = (
-                _merge(
+                _merge_configs(
                     low=low[key],
                     high=value,
                     merge_lists=merge_lists,
@@ -69,9 +69,9 @@ def load_and_merge_configs(
     """
     merged: dict = {}
     for path in paths_low_to_high:
-        data = anyconfig.load(pathlib.Path(path).resolve())
+        data = anyconfig.load(absolute_path(path))
         if isinstance(data, dict):
-            merged = _merge(
+            merged = _merge_configs(
                 low=merged,  # The data parsed so far
                 high=data,  # The new data source to merge
                 merge_lists=merge_lists,  # Whether to merge lists
@@ -81,8 +81,25 @@ def load_and_merge_configs(
     return merged
 
 
-def save_config(data: dict, path: str | PathLike) -> None:
-    anyconfig.dump(data, pathlib.Path(path).expanduser().resolve())
+def save_config(
+        data: dict,
+        path: str | PathLike,
+        *,
+        patch: bool = False,
+) -> None:
+    path = absolute_path(path)
+    if patch:
+        try:
+            file_data = anyconfig.load(path)
+        except FileNotFoundError:
+            file_data = {}
+        data = _merge_configs(
+            low=file_data,
+            high=data,
+            merge_lists=False,  # Patch, don't append
+        )
+
+    anyconfig.dump(data, path)
 
 
 class ConfigFileSource(PydanticBaseSettingsSource):
