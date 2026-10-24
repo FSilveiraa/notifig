@@ -13,6 +13,11 @@ from .meta import ConfigDict
 
 FILE_EXTENSIONS: tuple[str, ...] = ("json", "yaml", "yml", "toml", "ini")
 
+# Re-exports the error anyconfig raises under our own name.
+# If later we stop using anyconfig, we keep the exception name
+#  and point it at something else
+UnknownFormat = anyconfig.UnknownFileTypeError
+
 
 def _merge_lists(low: list, high: list, *, unique: bool) -> list:
     items = [*low, *high]

@@ -34,7 +34,8 @@ from .exceptions import (
 from .meta import ConfigDict
 from .section.dynamic import DynamicSection
 from .section.static import ConfigSection
-from .sources import FILE_EXTENSIONS
+from .utils import unwrap_optional
+from .sources import FILE_EXTENSIONS, UnknownFormat
 
 __all__ = [
     "Config",
@@ -53,6 +54,8 @@ __all__ = [
     "EntryRequiresData",
     "AsyncObserversNotCalled",
     "FILE_EXTENSIONS",
+    "UnknownFormat",
+    "unwrap_optional",
     "ConfigChange",
     "Updated",
     "Deleted",

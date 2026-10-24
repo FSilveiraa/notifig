@@ -1,4 +1,5 @@
 import sys
+from os import PathLike
 from typing import Annotated, override
 
 from pydantic import Field
@@ -12,7 +13,7 @@ from pydantic_settings import (
 from .annotations import AbsolutePath, Delimited
 from .meta import ConfigDict
 from .section.static import ConfigSection
-from .sources import ConfigFileSource
+from .sources import ConfigFileSource, save_config
 
 
 class Config(BaseSettings, ConfigSection):
@@ -38,6 +39,23 @@ class Config(BaseSettings, ConfigSection):
     config_files: Annotated[list[AbsolutePath], NoDecode, Delimited()] = Field(
         default_factory=list, exclude=True
     )
+
+    def save(self, path: str | PathLike | None = None, *, full: bool = False) -> None:
+        """
+        Write this config to `path`, or to the last file it was read from.
+        The config file is updated, never overwritten. It's read and parsed,
+        patched with the serialized config entries, and re-written.
+
+        With `full=True` the entire config is , otherwise only the
+        explicitly set entries are written.
+        """
+        target = path or (self.config_files[-1] if self.config_files else None)
+        if target is None:
+            raise ValueError(
+                "Can't save config: no path was given and "
+                "no config file was read"
+            )
+        save_config(self.model_dump(mode="json", exclude_unset=not full), target)
 
     @override
     @classmethod
