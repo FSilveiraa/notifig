@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import types
 import typing
-from typing import Any
+from types import UnionType
+from typing import Any, Union
 
 from pydantic import BaseModel
+from pydantic.fields import FieldInfo
 
 UNION_ORIGINS = (typing.Union, types.UnionType)
 
@@ -41,3 +45,22 @@ def type_name(declared: Any) -> str | None:
     if not isinstance(declared, (type, typing.NewType)):
         return None  # a TypeVar, `Self`, `Never`, an instance in slot 0
     return getattr(declared, "__name__", None)
+
+
+def unwrap_optional(_type: type | FieldInfo) -> tuple[bool, Any]:
+    """
+    Finds whether `_type` is a union of a type with None.
+    Union[X, None] -> (True, X). Anything else -> (False, _type).
+    :param _type:
+    :return:
+    """
+    annotation = _type.annotation if isinstance(_type, FieldInfo) else _type
+    origin = typing.get_origin(annotation)
+    # `X | None` and `Union[X, None]` are the same shape but different objects:
+    # PEP 604 gives `types.UnionType`, which is only unified with `typing.Union`
+    # from 3.14 on. Both spellings must answer the same here.
+    if origin is Union or origin is UnionType:
+        non_none = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+        if len(non_none) == 1:
+            return (True, non_none[0])
+    return (False, annotation)

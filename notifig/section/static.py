@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import typing
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, TypeIs, Union
+from typing import TYPE_CHECKING, Any, TypeIs
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 from pydantic.fields import FieldInfo
@@ -26,22 +25,6 @@ _MUTABLE = ConfigDict(
     # Ensures that unknown keys raise an error
     extra="forbid",
 )
-
-
-def unwrap_optional(_type: type | FieldInfo) -> tuple[bool, Any]:
-    """
-    Finds whether `_type` is a union of a type with None.
-    Union[X, None] -> (X, True). Anything else -> (_type, False).
-    :param _type:
-    :return:
-    """
-    annotation = _type.annotation if isinstance(_type, FieldInfo) else _type
-    origin = typing.get_origin(annotation)
-    if origin is Union:
-        non_none = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
-        if len(non_none) == 1:
-            return (True, non_none[0])
-    return (False, annotation)
 
 
 def matches_prefix(path: str, prefix: str) -> bool:
