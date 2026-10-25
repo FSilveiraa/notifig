@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Iterable, Sequence
 from os import PathLike
+from pathlib import Path
 from typing import Any
 
 import anyconfig
@@ -147,7 +150,36 @@ def save_config(
         if remove:
             data = _without_paths(data, remove)
 
-    anyconfig.dump(data, path)
+    _write_and_replace(data, path)
+
+
+def _write_and_replace(data: dict, path: Path) -> None:
+    """Writes `data` to `path` through a temp file beside it, then swaps it in.
+
+    `anyconfig.dump` opens its target with mode `"w"`, so a failure halfway through
+    (an unserialisable value, a full disk) would leave a truncated config. Writing
+    beside the target and `os.replace`-ing keeps the original intact until the new
+    document is complete.
+
+    The temp name keeps the target's suffix because the writer is picked by it, and
+    `NamedTemporaryFile` supplies the uniqueness: it creates the file with `O_EXCL`
+    under a random name, so two writers cannot pick the same one, and it starts at
+    `0600` rather than whatever the umask allows.
+    """
+
+    with tempfile.NamedTemporaryFile(
+        dir=path.parent,  # Who names a kwarg after a built-in??
+        prefix=f".{path.stem}.",
+        suffix=path.suffix,
+        delete_on_close=False,  # NOTE: Windows problem
+    ) as temporary:
+        temporary.close()  # NOTE: Windows problem
+        temp_path = temporary.name
+        anyconfig.dump(data, temp_path)
+        if path.exists():
+            # Keep the file's own permissions, a new tempfile is always 0600
+            os.chmod(temp_path, path.stat().st_mode & 0o777)
+        os.replace(temp_path, path)
 
 
 class ConfigFileSource(PydanticBaseSettingsSource):
