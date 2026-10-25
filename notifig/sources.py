@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from os import PathLike
 from typing import Any
 
@@ -32,7 +32,9 @@ def _merge_lists(low: list, high: list, *, unique: bool) -> list:
     return deduped
 
 
-def _merge_configs(low: Any, high: Any, *, merge_lists: bool, merge_lists_unique: bool = False) -> Any:
+def _merge_configs(
+    low: Any, high: Any, *, merge_lists: bool, merge_lists_unique: bool = False
+) -> Any:
     if isinstance(low, dict) and isinstance(high, dict):
         merged = dict(low)
         for key, value in high.items():
@@ -50,6 +52,48 @@ def _merge_configs(low: Any, high: Any, *, merge_lists: bool, merge_lists_unique
     if merge_lists and isinstance(low, list) and isinstance(high, list):
         return _merge_lists(low, high, unique=merge_lists_unique)
     return high
+
+
+def _parent_and_leaf_name_of(data: dict, path: str) -> tuple[dict | None, str]:
+    """Finds the parent and leaf name of the given path in `data`."""
+    *parents, leaf = path.split(".")
+    node = data
+    for parent in parents:
+        child = node.get(parent)
+        if not isinstance(child, dict):
+            return None, leaf
+        node = child
+    return node, leaf
+
+
+def _prune_empty(data: dict) -> dict:
+    """
+    Drops blocks that hold nothing, so removing a section's last entry doesn't leave
+    an empty parent.
+
+    `{"plugins": {"alpha": {}}}` becomes `{"plugins": {}}` becomes `{}`, which reads
+    back identically: a block with no keys and no block at all mean the same thing.
+    """
+    pruned = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            value = _prune_empty(value)
+            if not value:
+                continue
+        pruned[key] = value
+    return pruned
+
+
+def _without_paths(data: dict[str, Any], paths: Iterable[str]) -> dict[str, Any]:
+    """
+    Returns a copy of `data` with the leaf of each `path` removed.
+    Parents left empty also get deleted.
+    """
+    for path in paths:
+        parent, leaf = _parent_and_leaf_name_of(data, path)
+        if parent is not None:
+            parent.pop(leaf, None)
+    return _prune_empty(data)
 
 
 def load_and_merge_configs(
@@ -82,10 +126,11 @@ def load_and_merge_configs(
 
 
 def save_config(
-        data: dict,
-        path: str | PathLike,
-        *,
-        patch: bool = False,
+    data: dict,
+    path: str | PathLike,
+    *,
+    remove: list[str] | None = None,
+    patch: bool = False,
 ) -> None:
     path = absolute_path(path)
     if patch:
@@ -93,11 +138,14 @@ def save_config(
             file_data = anyconfig.load(path)
         except FileNotFoundError:
             file_data = {}
+
         data = _merge_configs(
             low=file_data,
             high=data,
             merge_lists=False,  # Patch, don't append
         )
+        if remove:
+            data = _without_paths(data, remove)
 
     anyconfig.dump(data, path)
 

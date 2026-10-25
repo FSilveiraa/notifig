@@ -54,7 +54,9 @@ class Config(BaseSettings, ConfigSection):
         super().model_post_init(context)
 
         @self.on_change()
-        def auto_save(section: ConfigSection, changes: tuple[ConfigChange, ...]) -> None:
+        def auto_save(
+            section: ConfigSection, changes: tuple[ConfigChange, ...]
+        ) -> None:
             """Saves the changed paths to the last config file read, if `auto_save` is on.
 
             The patch is the changed paths only, dumped through the model so each
@@ -67,23 +69,29 @@ class Config(BaseSettings, ConfigSection):
             if not self.config_files:
                 raise ValueError("Cannot auto-save since no config file was read.")
 
-            paths = [
-                change.path for change in changes
-                if not isinstance(change, Deleted)
-            ]
-            if not paths:
-                # TODO: a removed entry is not expressible as a dump. Persisting it
-                #  needs `save_config` to take the paths to remove, so the reader
-                #  stays one read and one write.
+            created_or_updated = []
+            removed = []
+            for change in changes:
+                if isinstance(change, Deleted):
+                    removed.append(change.path)
+                else:
+                    created_or_updated.append(change.path)
+            if not created_or_updated and not removed:
                 return
+
             # Serialize the config with only the specified paths
-            data = self.model_dump(
-                mode="json",
-                include=nested_include(paths),
+            data = (
+                self.model_dump(
+                    mode="json",
+                    include=nested_include(created_or_updated),
+                )
+                if created_or_updated
+                else {}
             )
             save_config(
                 data=data,
                 path=self.config_files[-1],
+                remove=removed or None,
                 patch=True,
             )
 
@@ -147,7 +155,6 @@ class Config(BaseSettings, ConfigSection):
             ConfigFileSource(settings_cls),
         )
 
-
     def save(self, path: str | PathLike | None = None, *, full: bool = False) -> None:
         """
         Write this config to `path`, or to the last file it was read from.
@@ -158,7 +165,6 @@ class Config(BaseSettings, ConfigSection):
         target = path or (self.config_files[-1] if self.config_files else None)
         if target is None:
             raise ValueError(
-                "Can't save config: no path was given and "
-                "no config file was read"
+                "Can't save config: no path was given and no config file was read"
             )
         save_config(self.model_dump(mode="json", exclude_unset=not full), target)

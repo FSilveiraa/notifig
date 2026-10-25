@@ -49,7 +49,13 @@ def test_save_full_writes_every_field(tmp_path):
 
     settings.save(target, full=True)
 
-    assert json.loads(target.read_text()) == {"api_url": "from-code", "feature": None}
+    # `auto_save` is a real setting, not an internal switch like `parse_cli`, so
+    # a full dump carries it too.
+    assert json.loads(target.read_text()) == {
+        "auto_save": False,
+        "api_url": "from-code",
+        "feature": None,
+    }
 
 
 def test_what_save_wrote_reads_back(tmp_path):
