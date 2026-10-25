@@ -1,6 +1,6 @@
 import sys
 from os import PathLike
-from typing import Annotated, override, Any
+from typing import Annotated, Any, override
 
 from pydantic import Field
 from pydantic_settings import (
@@ -10,11 +10,12 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
 )
 
-from .changes import ConfigChange
 from .annotations import AbsolutePath, Delimited
+from .changes import ConfigChange, Deleted
 from .meta import ConfigDict
 from .section.static import ConfigSection
 from .sources import ConfigFileSource, save_config
+from .utils import nested_include
 
 
 class Config(BaseSettings, ConfigSection):
@@ -51,18 +52,40 @@ class Config(BaseSettings, ConfigSection):
     @override
     def model_post_init(self, context: Any) -> None:
         super().model_post_init(context)
-        # Register an observer for auto-saving
+
         @self.on_change()
         def auto_save(section: ConfigSection, changes: tuple[ConfigChange, ...]) -> None:
-            """Saves the config changes if `auto_save==True`."""
-            if self.auto_save:
-                if not self.config_files:
-                    raise ValueError(
-                        "Cannot auto-save since no config file was read."
-                    )
-                path = self.config_files[-1]
+            """Saves the changed paths to the last config file read, if `auto_save` is on.
 
+            The patch is the changed paths only, dumped through the model so each
+            field keeps its own serialisation, so a value that came from the
+            environment or the command line is never written: it never changed,
+            so it is never in `changes`.
+            """
+            if not self.auto_save:
+                return
+            if not self.config_files:
+                raise ValueError("Cannot auto-save since no config file was read.")
 
+            paths = [
+                change.path for change in changes
+                if not isinstance(change, Deleted)
+            ]
+            if not paths:
+                # TODO: a removed entry is not expressible as a dump. Persisting it
+                #  needs `save_config` to take the paths to remove, so the reader
+                #  stays one read and one write.
+                return
+            # Serialize the config with only the specified paths
+            data = self.model_dump(
+                mode="json",
+                include=nested_include(paths),
+            )
+            save_config(
+                data=data,
+                path=self.config_files[-1],
+                patch=True,
+            )
 
     @override
     @classmethod

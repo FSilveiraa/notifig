@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import types
 import typing
+from collections.abc import Iterable
 from pathlib import Path
 from types import UnionType
 from typing import Any, Union
@@ -69,3 +70,28 @@ def unwrap_optional(_type: type | FieldInfo) -> tuple[bool, Any]:
 
 def absolute_path(value: Any) -> Path:
     return Path(value).expanduser().resolve()
+
+
+def nested_include(paths: Iterable[str]) -> dict[str, Any]:
+    """Fold dotted paths into the nested mapping pydantic's `include` expects.
+
+    `["api.url", "api.key", "interface.tui.theme"]` gives
+    `{"api": {"url": True, "key": True}, "interface": {"tui": {"theme": True}}}`,
+    where `True` means "everything under this name".
+
+    A path another path already covers is dropped, so `api` beats `api.url` and
+    the result never has to hold `True` and a mapping under the same name —
+    pydantic cannot read that mix. Paths are folded shortest first, which is what
+    makes the wider one win regardless of the order they were given in.
+    """
+    include: dict[str, Any] = {}
+    for path in sorted(paths, key=lambda folded: folded.count(".")):
+        *parents, leaf = path.split(".")
+        node = include
+        for parent in parents:
+            if node.setdefault(parent, {}) is True:
+                break  # a wider path already claims this subtree
+            node = node[parent]
+        else:
+            node.setdefault(leaf, True)
+    return include
