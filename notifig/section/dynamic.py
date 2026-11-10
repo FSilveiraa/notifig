@@ -16,7 +16,7 @@ from pydantic import (
 )
 from pydantic.fields import FieldInfo
 
-from ..changes import ConfigChange, Created, Deleted, Updated
+from ..write.notification import ConfigChange, Created, Deleted, Updated
 from ..exceptions import EntryRequiresData, PathNotFound
 from .static import _MUTABLE, ConfigSection
 

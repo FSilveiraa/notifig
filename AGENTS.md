@@ -80,7 +80,7 @@ tests/
   keeps the original file's permissions. `Config.save()` writes `exclude_unset` unless
   `full=True`. Auto-save patches only the changed paths (`nested_include`) into the last
   config file read and removes deleted paths. Values that came from env or the CLI are
-  never written, because they never appear in `changes`.
+  never written, because they never appear in `notification.py`.
 
 ## Design principles (from the README, and enforced in review)
 

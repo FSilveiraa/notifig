@@ -14,7 +14,7 @@ field links.
 
 from __future__ import annotations
 
-from .annotations import (
+from .annotation import (
     AbsolutePath,
     Choice,
     CLIFlags,
@@ -23,7 +23,7 @@ from .annotations import (
     Path,
     PathPattern,
 )
-from .changes import ConfigChange, Created, Deleted, Updated
+from .write.notification import ConfigChange, Created, Deleted, Updated
 from .config import Config
 from .exceptions import (
     AsyncObserversNotCalled,

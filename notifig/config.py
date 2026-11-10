@@ -10,8 +10,8 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
 )
 
-from .annotations import AbsolutePath, Delimited
-from .changes import ConfigChange, Deleted
+from .annotation import AbsolutePath, Delimited
+from .write.notification import ConfigChange, Deleted
 from .meta import ConfigDict
 from .section.static import ConfigSection
 from .sources import ConfigFileSource, save_config

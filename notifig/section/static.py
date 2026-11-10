@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any, TypeIs
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 from pydantic.fields import FieldInfo
 
-from ..annotations.cli_flags import CLIFlags
-from ..changes import ConfigChange, Created, Deleted, Updated
+from ..annotation.cli_flags import CLIFlags
+from ..write.notification import ConfigChange, Created, Deleted, Updated
 from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound
 
 # Model configs used by pydantic to inform model validation.
