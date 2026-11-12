@@ -113,9 +113,9 @@ def test_t1_a_malformed_block_is_a_load_error():
 def test_t1_validate_assignment_runs_on_base_model_setattr():
     """T1. `set_type` stores entries with `BaseModel.__setattr__` ON PURPOSE:
     the re-validation it triggers is what stamps the entry's `_name` through
-    `_bind` and records the name in `__pydantic_fields_set__`, so `/config
-    save` round-trips the entry. Losing that would silently break persistence,
-    not crash."""
+    `_stamp_parent_on_subsections` and records the name in
+    `__pydantic_fields_set__`, so `/config save` round-trips the entry. Losing
+    that would silently break persistence, not crash."""
 
     class Entry(ConfigSection):
         enabled: bool = True
@@ -190,3 +190,89 @@ def test_t2_set_type_survives_validate_assignment_rejecting_a_write():
     with pytest.raises(ValueError):
         settings.plugins.set_type("dotted.name", Entry)
     assert "dotted.name" not in dict(settings.plugins)
+
+
+def test_t1_model_validate_keeps_section_instances_by_identity():
+    """T1. A validation candidate is built from the section's CURRENT field
+    values with the batch's writes laid on top, and every untouched
+    sub-section is passed in as an instance rather than as data. Building a
+    candidate is only cheap, and only free of surprises, while pydantic's
+    default `revalidate_instances="never"` hands that instance straight back:
+    a copy would give the candidate its own tree, and the commit step would
+    then write values no validator ever saw."""
+
+    class Api(ConfigSection):
+        url: str = "https://default.test"
+
+    class Settings(Config):
+        api: Api
+
+    settings = Settings(api=Api(), parse_cli=False)
+    candidate = Settings._validation_candidate_class().model_validate(
+        {"api": settings.api}
+    )
+    assert candidate.api is settings.api
+
+
+def test_t1_a_validation_candidate_does_not_reparent_the_sections_it_is_built_from():
+    """T1. `ConfigSection._stamp_parent_on_subsections` is a `model_validator`
+    of mode `after`, so pydantic runs it on a candidate exactly as it runs on
+    a real section. A candidate is built from the LIVE `Api` instance, so
+    without the `_is_validation_candidate` check the live `Api` would be
+    re-parented onto a throwaway object, and every `_path` computed on it
+    afterwards would name the candidate instead of the config."""
+
+    class Api(ConfigSection):
+        url: str = "https://default.test"
+
+    class Settings(Config):
+        api: Api
+
+    settings = Settings(api=Api(), parse_cli=False)
+    api = settings.api
+    assert api._parent is settings
+
+    Settings._validation_candidate_class().model_validate({"api": api})
+
+    assert api._parent is settings
+
+
+def test_t1_a_validation_candidate_registers_no_observer():
+    """T1. `Config.model_post_init` is called by pydantic on a candidate too,
+    and it registers the auto-save observer there. A candidate must have no
+    effects on anything - it is a throwaway object built only to find out
+    whether a batch is valid - so the observer has to stay off it."""
+
+    class Api(ConfigSection):
+        url: str = "https://default.test"
+
+    class Settings(Config):
+        api: Api
+
+    settings = Settings(api=Api(), parse_cli=False)
+    assert len(settings._observers) == 1  # the auto-save observer
+
+    candidate = Settings._validation_candidate_class().model_validate(
+        {"api": settings.api}
+    )
+
+    assert candidate._observers == []
+
+
+def test_t2_a_candidate_error_names_the_original_class():
+    """T2. The candidate class is literally named `ValidationCandidate`, so a
+    `ValidationError` raised while validating one would read "for
+    ValidationCandidate" - a class the caller never wrote and cannot look up.
+    The `title` in the candidate's `model_config` is the only thing that keeps
+    the original class name in the message."""
+
+    class Api(ConfigSection):
+        url: str = "https://default.test"
+        port: int = 1
+
+    with pytest.raises(ValidationError) as error:
+        Api._validation_candidate_class().model_validate(
+            {"url": "x", "port": "not-a-number"}
+        )
+
+    assert str(error.value).splitlines()[0] == "1 validation error for Api"
