@@ -16,8 +16,8 @@ from pydantic import (
 )
 from pydantic.fields import FieldInfo
 
-from ..write.notification import ConfigChange, Created, Deleted, Updated
 from ..exceptions import EntryRequiresData, PathNotFound
+from ..write.notification import ConfigChange, Created, Deleted, Updated
 from .static import _MUTABLE, ConfigSection
 
 # Like _MUTABLE, but the section accepts keys it does not declare. A dynamic
@@ -368,9 +368,9 @@ class DynamicSection[T](ConfigSection):
         entry = TypeAdapter(self._entry_type).validate_python(value)
         before = self._unresolved.pop(name, None)
         # `BaseModel.__setattr__` on purpose: it re-runs `validate_assignment`, which is
-        #  what stamps the entry's `_name` through `_bind` and what puts the name into
-        #  `__pydantic_fields_set__` so `/config save` keeps it. Through
-        #  `self.__setattr__` it would route straight back into this method.
+        #  what stamps the entry's `_name` through `_stamp_parent_on_subsections` and
+        #  what puts the name into `__pydantic_fields_set__` so `/config save` keeps it.
+        #  Through `self.__setattr__` it would route straight back into this method.
         BaseModel.__setattr__(self, name, entry)
         self._mark_ancestors_as_set()
         return before

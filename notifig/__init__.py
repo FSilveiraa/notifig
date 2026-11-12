@@ -23,7 +23,6 @@ from .annotation import (
     Path,
     PathPattern,
 )
-from .write.notification import ConfigChange, Created, Deleted, Updated
 from .config import Config
 from .exceptions import (
     AsyncObserversNotCalled,
@@ -36,6 +35,7 @@ from .section.dynamic import DynamicSection
 from .section.static import ConfigSection
 from .sources import FILE_EXTENSIONS, UnknownFormat
 from .utils import nested_include, unwrap_optional
+from .write.notification import ConfigChange, Created, Deleted, Updated
 
 __all__ = [
     "Config",

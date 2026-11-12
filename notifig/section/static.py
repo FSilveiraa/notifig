@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, TypeIs
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeIs
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 from pydantic.fields import FieldInfo
 
 from ..annotation.cli_flags import CLIFlags
-from ..write.notification import ConfigChange, Created, Deleted, Updated
 from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound
+from ..write.notification import ConfigChange, Created, Deleted, Updated
 
 # Model configs used by pydantic to inform model validation.
 # Forces model re-validation on re-assignment and allows arbitrary types.
@@ -49,18 +50,24 @@ class ConfigSection(BaseModel):
      Supports dict operators OR and IN: `if field in (section1 | section2)`.
     """
 
+    # Pydantic internal
     model_config = _MUTABLE
 
-    #: Where this section sits in its parent, so a write can be reported in
-    #: every enclosing section's own vocabulary. Stamped by `_bind` below, which
-    #: is why nothing has to be wired after construction.
+    # Paths across sections are walked using their `name` and `parent` references.
+    # NOTE: Both of these are set post-construction inside `_stamp_parent_on_subsections`
+    # The name of the field pointing to this section
     _name: str = PrivateAttr(default="")
+    # The section owning this one
     _parent: ConfigSection | None = PrivateAttr(default=None)
 
     # observers for field changes: (callback, paths_filter | None)
     _observers: list[tuple[ConfigObserver, frozenset[str] | None]] = PrivateAttr(
         default_factory=list
     )
+
+    # Is this a section built as a candidate for validation
+    # If so, disable post-construction things like parent stamping
+    _is_validation_candidate: ClassVar[bool] = False
 
     @property
     def _path(self) -> str:
@@ -69,20 +76,23 @@ class ConfigSection(BaseModel):
         return f"{self._parent._path}.{self._name}"
 
     @model_validator(mode="after")
-    def _bind(self) -> ConfigSection:
+    def _stamp_parent_on_subsections(self) -> ConfigSection:
         """
         Sets this section as the parent of each subsection it holds.
 
-        Runs on construction AND on assignment (`validate_assignment`), so a
-        section swapped in at runtime is bound by the same path that bound the
-        original — there is no post-construction wiring step to forget.
+        Runs on construction AND on assignment (if `validate_assignment==True`),
+        so a section swapped in at runtime is bound by the same path as the
+        original. There is no post-init step to forget.
 
+        NOTE: does not run for validation candidates, so when building a
+         candidate it does not become the parent of real sections.
         HACK: setting private fields post-construction of subsections is bad.
         """
-        for name, value in self:
-            if isinstance(value, ConfigSection):
-                value._parent = self
-                value._name = name
+        if not self._is_validation_candidate:
+            for name, value in self:
+                if isinstance(value, ConfigSection):
+                    value._parent = self
+                    value._name = name
         return self
 
     def __getitem__(self, name: str) -> Any:
@@ -188,6 +198,38 @@ class ConfigSection(BaseModel):
 
     def __or__(self, other: ConfigSection) -> dict[str, Any]:
         return dict(self) | dict(other)
+
+    @classmethod
+    @functools.cache
+    def _validation_candidate_class(cls) -> type[Self]:
+        """
+        Creates a dynamic class as a validation candidate for an altered
+        config section.
+        """
+
+        # NOTE: `type: ignore` is necessary since mypy refuses a variable as a
+        #  base class.
+        class ValidationCandidate(cls):  # type: ignore[valid-type, misc]
+            # Config inherits BaseSettings, and its constructor reads config
+            #  files, env and CLI. We don't want that to happen for validation
+            #  candidates. So use BaseModel.__init__ instead, which just
+            #  handles the data it is passed.
+            __init__ = BaseModel.__init__
+            # The Python module path for this class, otherwise it would be
+            #  the path for this file.
+            __module__ = cls.__module__
+            model_config = ConfigDict(
+                # Errors use the original class name
+                title=cls.model_config.get("title", cls.__name__),
+                # `populate_by_name=True` supposedly allows fields with aliases
+                #  to be addressable by name. The parent's model_config is merged.
+                # TODO: understand this need better
+                populate_by_name=True,
+            )
+            # Disable parent stamping and `model_post_init` checks
+            _is_validation_candidate = True
+
+        return ValidationCandidate
 
     @classmethod
     def walk_schema(cls, path: str) -> Iterator[tuple[str, FieldInfo]]:

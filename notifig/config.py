@@ -11,11 +11,11 @@ from pydantic_settings import (
 )
 
 from .annotation import AbsolutePath, Delimited
-from .write.notification import ConfigChange, Deleted
 from .meta import ConfigDict
 from .section.static import ConfigSection
 from .sources import ConfigFileSource, save_config
 from .utils import nested_include
+from .write.notification import ConfigChange, Deleted
 
 
 class Config(BaseSettings, ConfigSection):
@@ -52,6 +52,10 @@ class Config(BaseSettings, ConfigSection):
     @override
     def model_post_init(self, context: Any) -> None:
         super().model_post_init(context)
+
+        # Do not register auto-save for validation candidates
+        if self._is_validation_candidate:
+            return
 
         @self.on_change()
         def auto_save(
