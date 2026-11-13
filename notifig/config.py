@@ -53,10 +53,6 @@ class Config(BaseSettings, ConfigSection):
     def model_post_init(self, context: Any) -> None:
         super().model_post_init(context)
 
-        # Do not register auto-save for validation candidates
-        if self._is_validation_candidate:
-            return
-
         @self.on_change()
         def auto_save(
             section: ConfigSection, changes: tuple[ConfigChange, ...]

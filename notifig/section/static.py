@@ -5,7 +5,7 @@ import functools
 import inspect
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeIs
+from typing import TYPE_CHECKING, Any, Self, TypeIs
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 from pydantic.fields import FieldInfo
@@ -65,10 +65,6 @@ class ConfigSection(BaseModel):
         default_factory=list
     )
 
-    # Is this a section built as a candidate for validation
-    # If so, disable post-construction things like parent stamping
-    _is_validation_candidate: ClassVar[bool] = False
-
     @property
     def _path(self) -> str:
         if self._parent is None or not self._parent._path:
@@ -84,15 +80,12 @@ class ConfigSection(BaseModel):
         so a section swapped in at runtime is bound by the same path as the
         original. There is no post-init step to forget.
 
-        NOTE: does not run for validation candidates, so when building a
-         candidate it does not become the parent of real sections.
         HACK: setting private fields post-construction of subsections is bad.
         """
-        if not self._is_validation_candidate:
-            for name, value in self:
-                if isinstance(value, ConfigSection):
-                    value._parent = self
-                    value._name = name
+        for name, value in self:
+            if isinstance(value, ConfigSection):
+                value._parent = self
+                value._name = name
         return self
 
     def __getitem__(self, name: str) -> Any:
