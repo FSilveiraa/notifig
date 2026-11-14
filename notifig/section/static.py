@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, Self, TypeIs
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 from pydantic.fields import FieldInfo
 
-from .validation import candidate_class_from_section_class
 from ..annotation.cli_flags import CLIFlags
 from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound
 from ..utils import split_parent_path_and_leaf
@@ -37,9 +36,8 @@ class _ChangeGroup:
     parent_path: str
     # Changes to be applied to leaves of parent
     change_requests: list[tuple[ChangeRequest, FieldInfo]]
-    # The actual parent section and its validation candidate
+    # The parent section for the path's leaf
     parent_section: ConfigSection
-    parent_candidate_class: type[ConfigSection]
 
 
 def matches_prefix(path: str, prefix: str) -> bool:
@@ -679,13 +677,10 @@ class ConfigSection(BaseModel):
                 change_group_for_parent = changes_by_parent[parent_path]
             except KeyError:
                 # First change for this parent.
-                # Create a validation candidate class for the parent
-                validation_candidate_class = candidate_class_from_section_class(type(parent_section))
                 change_group_for_parent = changes_by_parent[parent_path] = _ChangeGroup(
                     parent_path=parent_path,
                     change_requests=[],
                     parent_section=parent_section,
-                    parent_candidate_class=validation_candidate_class,
                 )
             change_group_for_parent.change_requests.append((change_request, field_info))
         return changes_by_parent
