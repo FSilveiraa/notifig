@@ -72,6 +72,16 @@ def absolute_path(value: Any) -> Path:
     return Path(value).expanduser().resolve()
 
 
+def split_parent_path_and_leaf(path: str) -> tuple[str, str]:
+    """
+    Splits a path into parent path and leaf name.
+    A bare name has an empty parent.
+    `"server.host.name"` -> `("server.host", "name")`.
+    """
+    parent, _delimiter, leaf = path.rpartition(".")
+    return parent, leaf
+
+
 def nested_include(paths: Iterable[str]) -> dict[str, Any]:
     """Fold dotted paths into the nested mapping pydantic's `include` expects.
 

@@ -4,15 +4,18 @@ import asyncio
 import functools
 import inspect
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import replace
+from dataclasses import replace, dataclass
 from typing import TYPE_CHECKING, Any, Self, TypeIs
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 from pydantic.fields import FieldInfo
 
+from .validation import candidate_class_from_section_class
 from ..annotation.cli_flags import CLIFlags
 from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound
+from ..utils import split_parent_path_and_leaf
 from ..write.notification import ConfigChange, Created, Deleted, Updated
+from ..write.request import ChangeRequest
 
 # Model configs used by pydantic to inform model validation.
 # Forces model re-validation on re-assignment and allows arbitrary types.
@@ -26,6 +29,17 @@ _MUTABLE = ConfigDict(
     # Ensures that unknown keys raise an error
     extra="forbid",
 )
+
+
+@dataclass(frozen=True)
+class _ChangeGroup:
+    # Common parent path of each change
+    parent_path: str
+    # Changes to be applied to leaves of parent
+    change_requests: list[tuple[ChangeRequest, FieldInfo]]
+    # The actual parent section and its validation candidate
+    parent_section: ConfigSection
+    parent_candidate_class: type[ConfigSection]
 
 
 def matches_prefix(path: str, prefix: str) -> bool:
@@ -646,6 +660,66 @@ class ConfigSection(BaseModel):
             value = section._delete(leaf_name)
             changes.append(Deleted(path=path, value=value))
         return self._notify(*changes)
+
+
+
+
+    ###########################################################################
+    # BEGIN Atomic writing
+    ###########################################################################
+
+    def _group_changes_by_parent(self, requests: list[ChangeRequest]) -> dict[str, _ChangeGroup]:
+        """Group changes by parent section path."""
+        changes_by_parent = {}
+        for change_request in requests:
+            parent_path, _leaf_name = split_parent_path_and_leaf(change_request.path)
+            # Find the parent section,
+            parent_section, _leaf_name, field_info = self.leaf_parent_name_and_schema(change_request.path)
+            try:
+                change_group_for_parent = changes_by_parent[parent_path]
+            except KeyError:
+                # First change for this parent.
+                # Create a validation candidate class for the parent
+                validation_candidate_class = candidate_class_from_section_class(type(parent_section))
+                change_group_for_parent = changes_by_parent[parent_path] = _ChangeGroup(
+                    parent_path=parent_path,
+                    change_requests=[],
+                    parent_section=parent_section,
+                    parent_candidate_class=validation_candidate_class,
+                )
+            change_group_for_parent.change_requests.append((change_request, field_info))
+        return changes_by_parent
+
+
+    def _validate_and_commit_changes(self, requests: list[ChangeRequest]):
+        """
+        Single entrypoint for all updates/deletions to section tree.
+        Changes are validated as an atomic batch using validation candidates.
+        If any change would fail on a candidate, the entire batch fails.
+        Otherwise, the changes are copied from the candidates back to the
+         live parent sections.
+
+        NOTE: This solution applies start data to validation candidates, and if
+         successful it *copies* final data from candidates to live section.__dict__.
+         Because of field/model validators, start data may differ from final data,
+         and this solution chooses to only run validators on the candidates, bypassed
+         on the live sections. It also means running the parent stamp again.
+         There's an argument to re-apply the start data on the live sections if
+         validation passes, which would run validators again, but would follow the
+         normal assignment flow.
+        """
+
+        # Group changes by parent path
+        changes_by_parent = self._group_changes_by_parent(requests)
+
+
+    ###########################################################################
+    # END Atomic writing
+    ###########################################################################
+
+
+
+
 
 
 def _is_section(cls: Any) -> TypeIs[type[ConfigSection]]:

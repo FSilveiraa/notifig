@@ -24,7 +24,7 @@ class ValidationSection(ConfigSection):
 # NOTE: we usually don't cache things since it's cheap to rebuild
 #  and allows for dynamics, but this is building schema from schema
 @functools.cache
-def from_section(section_class: type[ConfigSection]) -> type[ConfigSection]:
+def candidate_class_from_section_class(section_class: type[ConfigSection]) -> type[ConfigSection]:
     """Returns a section that can validate writing to `section` atomically."""
 
     class ValidationCandidate(ValidationSection, section_class):  # type: ignore[valid-type, misc]
