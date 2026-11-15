@@ -7,14 +7,15 @@ from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import replace, dataclass
 from typing import TYPE_CHECKING, Any, Self, TypeIs
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator, ValidationError
 from pydantic.fields import FieldInfo
+from pydantic_core import InitErrorDetails
 
 from ..annotation.cli_flags import CLIFlags
 from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound
 from ..utils import split_parent_path_and_leaf
 from ..write.notification import ConfigChange, Created, Deleted, Updated
-from ..write.request import ChangeRequest
+from ..write.request import ChangeRequest, Assign
 
 # Model configs used by pydantic to inform model validation.
 # Forces model re-validation on re-assignment and allows arbitrary types.
@@ -35,7 +36,7 @@ class _ChangeGroup:
     # Common parent path of each change
     parent_path: str
     # Changes to be applied to leaves of parent
-    change_requests: list[tuple[ChangeRequest, FieldInfo]]
+    change_requests_by_leaf_name: dict[str, ChangeRequest]
     # The parent section for the path's leaf
     parent_section: ConfigSection
 
@@ -668,22 +669,64 @@ class ConfigSection(BaseModel):
 
     def _group_changes_by_parent(self, requests: list[ChangeRequest]) -> dict[str, _ChangeGroup]:
         """Group changes by parent section path."""
-        changes_by_parent = {}
+        changes_by_parent: dict[str, _ChangeGroup] = {}
         for change_request in requests:
-            parent_path, _leaf_name = split_parent_path_and_leaf(change_request.path)
+            parent_path, leaf_name = split_parent_path_and_leaf(change_request.path)
             # Find the parent section,
             parent_section, _leaf_name, field_info = self.leaf_parent_name_and_schema(change_request.path)
+            assert leaf_name == _leaf_name
             try:
                 change_group_for_parent = changes_by_parent[parent_path]
             except KeyError:
                 # First change for this parent.
                 change_group_for_parent = changes_by_parent[parent_path] = _ChangeGroup(
                     parent_path=parent_path,
-                    change_requests=[],
+                    change_requests_by_leaf_name={},
                     parent_section=parent_section,
                 )
-            change_group_for_parent.change_requests.append((change_request, field_info))
+            change_group_for_parent.change_requests_by_leaf_name[leaf_name] = change_request
         return changes_by_parent
+
+
+    @classmethod
+    def _refuse_writing_to_frozen_fields(cls, change_requests: dict[str, ChangeRequest]) -> None:
+        """
+        Raises an error if any change attempts to modify a frozen field, or if
+        the section itself is frozen (`model_config["frozen"]`).
+        `change_requests` maps leaf names (not paths) to their change requests,
+        basically the contents of `_ChangeGroup.change_requests_by_leaf_name`.
+        A failure is raised exactly as pydantic does it, indicating failed names.
+        """
+        # Check if this entire section is frozen, otherwise check per field
+        if cls.model_config.get("frozen"):
+            error_type = "frozen_instance"
+            refused_names = list(change_requests)
+        else:
+            error_type = "frozen_field"
+            refused_names = []
+            for leaf_name in change_requests:
+                # A leaf name that's not on `model_fields` can still exist
+                #  in model_extra for DynamicSection and can't be frozen
+                if (
+                    (field_info := cls.model_fields.get(leaf_name))
+                    and field_info.frozen
+                ):
+                    refused_names.append(leaf_name)
+
+        # Raise a joint error for frozen fields
+        if refused_names:
+            line_errors: list[InitErrorDetails] = []
+            for leaf_name in refused_names:
+                change_request = change_requests[leaf_name]
+                line_errors.append({
+                    "type": error_type,
+                    "loc": (leaf_name,),
+                    "input": change_request.value if isinstance(change_request, Assign) else None,
+                })
+            raise ValidationError.from_exception_data(
+                title=cls.__name__,
+                line_errors=line_errors,
+            )
 
 
     def _validate_and_commit_changes(self, requests: list[ChangeRequest]):
@@ -706,6 +749,11 @@ class ConfigSection(BaseModel):
 
         # Group changes by parent path
         changes_by_parent = self._group_changes_by_parent(requests)
+        # Ensure no change happens on a frozen field/section
+        for change_group in changes_by_parent.values():
+            change_group.parent_section._refuse_writing_to_frozen_fields(
+                change_group.change_requests_by_leaf_name
+            )
 
 
     ###########################################################################
