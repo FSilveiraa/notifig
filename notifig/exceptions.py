@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import contextmanager
+from typing import Iterator
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 
 class PathNotFound(AttributeError):
@@ -16,6 +18,15 @@ class NotASection(AttributeError):
         if path:
             msg = f"{path!r}: {msg}"
         super().__init__(msg)
+
+
+
+class InvalidEntryName(ValueError):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"{name!r} cannot be an entry name. Dots are used as a delimiter in "
+            f"dotted path semantics."
+        )
 
 
 class EntryRequiresData(ValueError):
@@ -91,3 +102,29 @@ class CantDeleteRetypeDeclaredField(AttributeError):
             f"{field_name!r} is a declared field of {model.__name__!r} and"
             f" can't be deleted or change its type"
         )
+
+
+@contextmanager
+def entry_requires_data_when_fields_are_missing(
+    entry_type: type[BaseModel], entry_name: str
+) -> Iterator[None]:
+    """
+    Creates a context that catches a ValidationError; if all the sub-errors are
+     about missing fields it raises an `EntryRequiresData`, otherwise re-raises.
+
+    The motivation is exposing a clear message about what failed, which Pydantic
+     condenses into a single ValidationError. This way, missing data for a required
+     field is raised differently from existing but incorrect data for that field.
+    """
+    try:
+        yield
+    except ValidationError as error:
+        line_errors = error.errors()
+        # At least one item was not about missing data for a required field
+        if not line_errors or any(line_error["type"] != "missing" for line_error in line_errors):
+            raise
+        # All items are about missing data for required fields, raise appropriately
+        missing_fields = [
+            ".".join(str(part) for part in line_error["loc"]) for line_error in line_errors
+        ]
+        raise EntryRequiresData(entry_type, entry_name, missing_fields) from error

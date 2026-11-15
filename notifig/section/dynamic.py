@@ -16,7 +16,9 @@ from pydantic import (
 )
 from pydantic.fields import FieldInfo
 
-from ..exceptions import EntryRequiresData, PathNotFound, CantDeleteRetypeDeclaredField
+from ..exceptions import EntryRequiresData, PathNotFound, CantDeleteRetypeDeclaredField, InvalidEntryName, \
+    entry_requires_data_when_fields_are_missing
+from ..utils import is_pydantic_model
 from ..write.notification import ConfigChange, Created, Deleted, Updated
 from .static import _MUTABLE, ConfigSection, _CandidateData
 
@@ -92,7 +94,7 @@ class DynamicSection[T](ConfigSection):
         #  attribute would also be true for a section that inherits it, and
         #  that section would then rebuild an already-rebuilt type
         #  (`ToolConfig_Preserving_Preserving`).
-        if _is_pydantic_model(cls._entry_type) and cls.__dict__.get(
+        if is_pydantic_model(cls._entry_type) and cls.__dict__.get(
             "force_preserve_extra"
         ):
             # A type that already allows extras needs no copy: the copy's only job is
@@ -173,9 +175,9 @@ class DynamicSection[T](ConfigSection):
         #  at the door, not kept as an unreachable object.
         for name in pending:
             if "." in name:
-                raise _entry_name_error(name)
+                raise InvalidEntryName(name)
 
-        if _is_pydantic_model(cls._entry_type):
+        if is_pydantic_model(cls._entry_type):
             # Build every block NOW, from the entry type: one malformed block
             #  is one loud error, and a valid block is a live entry.
             for name, value in pending.items():
@@ -227,7 +229,7 @@ class DynamicSection[T](ConfigSection):
             #  `BaseModel.__setattr__` below does not roll its write back
             #  when `validate_assignment` rejects it.
             if "." in name:
-                raise _entry_name_error(name)
+                raise InvalidEntryName(name)
             current = (self.model_extra or {}).get(name)
             if current is not None and type(current) is model:
                 continue  # Same type, don't rebuild so sections don't lose observers
@@ -344,7 +346,7 @@ class DynamicSection[T](ConfigSection):
         #  not by `[]`, not as an attribute, not by a dotted path. Refusing
         #  here is what makes "the dot always navigates" unambiguous.
         if "." in name:
-            raise _entry_name_error(name)
+            raise InvalidEntryName(name)
 
         # 2. An entry that already exists: its own class types the value
         entries = self.model_extra or {}
@@ -358,7 +360,7 @@ class DynamicSection[T](ConfigSection):
             return super()._set(name, value)
 
         # 3. If the entry type isn't a model, update `unresolved`
-        if not _is_pydantic_model(self._entry_type):
+        if not is_pydantic_model(self._entry_type):
             before = self._unresolved.get(name)
             self._unresolved[name] = value
             self._mark_ancestors_as_set()
@@ -421,6 +423,7 @@ class DynamicSection[T](ConfigSection):
 
     @override
     def _apply_assign(self, candidate_data: _CandidateData, leaf_name: str, value: Any) -> None:
+        """Sets the value of `leaf_name` to `value` in `candidate_data`."""
         # 1. Declared field, gets validated by the candidate's annotation
         if leaf_name in type(self).model_fields:
             candidate_data.data[leaf_name] = value
@@ -430,20 +433,19 @@ class DynamicSection[T](ConfigSection):
             # Types don't match, use Pydantic's caster
             if not isinstance(value, entry_type):
                 value = TypeAdapter(entry_type).validate_python(value)
+            candidate_data.data[leaf_name] = value
         # 3. Unresolved entry, entry type is pydantic model, validate
-        #  from pydantic
-        elif _is_pydantic_model(self._entry_type):
+        #  from pydantic adapter
+        elif is_pydantic_model(self._entry_type):
             candidate_data.data[leaf_name] = TypeAdapter(self._entry_type).validate_python(value)
             candidate_data.unresolved.pop(leaf_name, None)
-        # 4. Unresolved entry, entry type isn't bu
-
-        if leaf_name in self._unresolved:
-            candidate_data.unresolved[leaf_name] = value
+        # 4. Unresolved entry, entry type isn't buildable, keep in unresolved
         else:
-            candidate_data.data[leaf_name] = value
+            candidate_data.unresolved[leaf_name] = value
 
     @override
     def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> None:
+        """Removes `leaf_name` from `candidate_data`."""
         # Refuse deleting a declared field
         if leaf_name in type(self).model_fields:
             raise CantDeleteRetypeDeclaredField(type(self), leaf_name)
@@ -454,46 +456,63 @@ class DynamicSection[T](ConfigSection):
             try:
                 del candidate_data.unresolved[leaf_name]
             except KeyError:
-                raise PathNotFound(type(self), leaf_name)
+                raise PathNotFound(type(self), leaf_name) from None
 
     @override
-    def _apply_set_type(self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any) -> None:
-        raise NotImplemented
+    def _apply_set_type(
+            self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any
+    ) -> None:
+        """Sets `entry_type` as the type for `leaf_name` in `candidate_data`. """
+        # Refuse re-typing a declared field
+        if leaf_name in type(self).model_fields:
+            raise CantDeleteRetypeDeclaredField(type(self), leaf_name)
+        current_entry = candidate_data.data.get(leaf_name)
+        # 1. This entry exists and already has a type
+        if current_entry is not None:
+            if type(current_entry) is entry_type:
+                # Same type: keep the built entry, so it keeps its observers
+                return
+            else:
+                # Dump the entry into raw data
+                raw_data = TypeAdapter(type(current_entry)).dump_python(
+                    current_entry,
+                    mode="json",
+                    # Don't include entries built from defaults, the new
+                    #  model might have different ones
+                    exclude_unset=True,
+                )
+        # 2. Entry exists as untyped data
+        elif leaf_name in candidate_data.unresolved:
+            raw_data = candidate_data.unresolved[leaf_name]
+        # 3. The entry doesn't exist, but we can try to build a pydantic model from defaults
+        elif is_pydantic_model(entry_type):
+            raw_data = {}
+            # TODO
+            # candidate_data.built_from_defaults.add(leaf_name)
+        else:
+            raise PathNotFound(type(self), leaf_name)
+
+        # Try to build an entry from the gathered raw data
+        # Use context manager to raise appropriate exception in case anything fails
+        with entry_requires_data_when_fields_are_missing(entry_type, leaf_name):
+            new_entry = TypeAdapter(entry_type).validate_python(raw_data)
+        # The entry is now typed so it moves to `data` and leaves `unresolved` if it's there
+        candidate_data.data[leaf_name] = new_entry
+        candidate_data.unresolved.pop(leaf_name, None)
+
 
     @override
     def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> None:
-        raise NotImplemented
-
-
-
-def _entry_name_error(name: str) -> ValueError:
-    """The one refusal message for an entry name carrying a dot.
-
-    `section["a.b"]` navigates to `b` inside `a`, so an entry named `a.b`
-    could never be read back - not by `[]`, as an attribute, or by a dotted
-    path. The rule is enforced at every door a name can enter through
-    (`_instantiate_entries` for parsed data, `DynamicSection._set` for plain
-    writes, `set_type` for re-typing) because pydantic's doors differ; the
-    MESSAGE has this one home."""
-    return ValueError(
-        f"{name!r} cannot be an entry name: a dot means 'one level down' "
-        f'(section["a.b"] reads b inside a), so an entry carrying one could '
-        f"never be read back. Rename it."
-    )
-
-
-def _is_pydantic_model(t: Any) -> bool:
-    return isinstance(t, type) and issubclass(t, BaseModel)
-
-
-def _missing_fields(error: ValidationError) -> list[str]:
-    """Dotted names of fields the data didn't carry, when that is all that's wrong.
-
-    A model that refuses a value it was given is a different failure from a model
-    that was given nothing for a field: the first belongs to the data, the second
-    is an entry waiting for data its caller may not have. Empty means the first.
-    """
-    errors = error.errors()
-    if not errors or any(item["type"] != "missing" for item in errors):
-        return []
-    return [".".join(str(part) for part in item["loc"]) for item in errors]
+        """Un-types `leaf_name` into `candidate_data.unresolved`."""
+        # Refuse removing the type for a declared field
+        if leaf_name in type(self).model_fields:
+            raise CantDeleteRetypeDeclaredField(type(self), leaf_name)
+        # Get entry if it exists (should be in model_extra), dump it
+        #  and move it to unresolved.
+        try:
+            entry = candidate_data.data.pop(leaf_name)
+        except KeyError:
+            raise PathNotFound(type(self), leaf_name) from None
+        candidate_data.unresolved[leaf_name] = TypeAdapter(type(entry)).dump_python(
+            entry, mode="json", exclude_unset=True
+        )

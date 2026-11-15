@@ -49,7 +49,7 @@ tests/
   construction *and* on reassignment. Never add a separate post-construction wiring step.
 - **Paths.** A dot always means "one level down": `section["api.url"]`,
   `section.get("api.url")`, `set(**{"api.url": ...})`. Dynamic entry names may not
-  contain dots, and `_entry_name_error` is the only place that message is built.
+  contain dots, and `InvalidEntryName` is the only place that message is built.
   `walk`/`walk_schema` accept `*` (one level) and `**` (everything below, last segment only).
   Path resolution lives in `leaf_parent_name_and_schema`, so reuse it instead of writing another.
 - **Writes and notifications.** Every writer goes through `_set` / `_delete` and then

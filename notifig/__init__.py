@@ -26,6 +26,7 @@ from .annotation import (
 from .config import Config
 from .exceptions import (
     AsyncObserversNotCalled,
+    InvalidEntryName,
     EntryRequiresData,
     NotASection,
     PathNotFound,
@@ -52,6 +53,7 @@ __all__ = [
     "PathPattern",
     "PathNotFound",
     "NotASection",
+    "InvalidEntryName",
     "EntryRequiresData",
     "CantDeleteRetypeDeclaredField",
     "AsyncObserversNotCalled",
