@@ -92,7 +92,7 @@ class FlagIsReserved(ValueError):
     def __init__(self, flags: Sequence[str]):
         super().__init__(
             f"'{','.join(flags)}' {'are' if len(flags) > 1 else 'is'}"
-            f"reserved by the CLI parser and can't be used as flags."
+            f" reserved by the CLI parser and can't be used as flags."
         )
 
 
@@ -101,6 +101,17 @@ class CantDeleteRetypeDeclaredField(AttributeError):
         super().__init__(
             f"{field_name!r} is a declared field of {model.__name__!r} and"
             f" can't be deleted or change its type"
+        )
+
+
+class OverlappingChangePaths(ValueError):
+    def __init__(self, paths: Sequence[tuple[str, str]]):
+        pairs = "\n".join(
+            f"  {path!r} and {other_path!r}"
+            for path, other_path in paths
+        )
+        super().__init__(
+            f"Cannot apply changes to the following overlapping paths:\n{pairs}"
         )
 
 

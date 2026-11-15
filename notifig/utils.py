@@ -105,3 +105,13 @@ def nested_include(paths: Iterable[str]) -> dict[str, Any]:
         else:
             node.setdefault(leaf, True)
     return include
+
+
+def matches_prefix(path: str, prefix: str) -> bool:
+    """Whether `path` is `prefix` itself or sits underneath it.
+
+    The boundary is the point: a bare `startswith` makes `interface` match
+    `interface_theme`, so an observer subscribed to a section would be woken by
+    an unrelated top-level field.
+    """
+    return path == prefix or path.startswith(f"{prefix}.")

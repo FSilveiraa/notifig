@@ -487,8 +487,7 @@ class DynamicSection[T](ConfigSection):
         # 3. The entry doesn't exist, but we can try to build a pydantic model from defaults
         elif is_pydantic_model(entry_type):
             raw_data = {}
-            # TODO
-            # candidate_data.built_from_defaults.add(leaf_name)
+            candidate_data.built_from_defaults.add(leaf_name)
         else:
             raise PathNotFound(type(self), leaf_name)
 

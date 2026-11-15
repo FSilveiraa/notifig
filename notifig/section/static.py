@@ -12,8 +12,9 @@ from pydantic.fields import FieldInfo
 from pydantic_core import InitErrorDetails
 
 from ..annotation.cli_flags import CLIFlags
-from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound, CantDeleteRetypeDeclaredField
-from ..utils import split_parent_path_and_leaf
+from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound, CantDeleteRetypeDeclaredField, \
+    OverlappingChangePaths
+from ..utils import split_parent_path_and_leaf, matches_prefix
 from ..write.notification import ConfigChange, Created, Deleted, Updated
 from ..write.request import ChangeRequest, Assign, Delete, SetType, RemoveType
 
@@ -43,18 +44,12 @@ class _ChangeGroup:
 
 @dataclass(frozen=True)
 class _CandidateData:
+    # Data for declared fields and typed entries
     data: dict[str, Any] = field(default_factory=dict)
+    # Untyped data that goes into `unresolved` for DynamicSection
     unresolved: dict[str, Any] = field(default_factory=dict)
-
-
-def matches_prefix(path: str, prefix: str) -> bool:
-    """Whether `path` is `prefix` itself or sits underneath it.
-
-    The boundary is the point: a bare `startswith` makes `interface` match
-    `interface_theme`, so an observer subscribed to a section would be woken by
-    an unrelated top-level field.
-    """
-    return path == prefix or path.startswith(f"{prefix}.")
+    # Name of entries built from model defaults, must not be marked as set
+    built_from_defaults: set[str] = field(default_factory=set)
 
 
 class ConfigSection(BaseModel):
@@ -733,11 +728,31 @@ class ConfigSection(BaseModel):
                 line_errors=line_errors,
             )
 
+    @staticmethod
+    def _refuse_changes_for_overlapping_paths(change_requests: list[ChangeRequest]) -> None:
+        """
+        Raise if any changes are for overlapping or identical paths.
+        Ex: delete `api`, assign a value to `api.host.url`.
+        """
+        paths = [request.path for request in change_requests]
+        overlapping = [
+            (path, other_path)
+            for index, path in enumerate(paths)
+            for other_path in paths[index + 1 :]
+            if (
+                matches_prefix(path, other_path)
+                or matches_prefix(other_path, path)
+            )
+        ]
+        if overlapping:
+            raise OverlappingChangePaths(overlapping)
+
+
     def _start_candidate_data(self) -> _CandidateData:
         return _CandidateData(data=dict(self))
 
     @classmethod
-    def _refuse_deleting_or_retyping_declared_field(cls, leaf_name: str) -> NoReturn:
+    def _raise_deleting_or_retyping_declared_field(cls, leaf_name: str) -> NoReturn:
         if leaf_name in cls.model_fields:
             raise CantDeleteRetypeDeclaredField(cls, leaf_name)
         raise PathNotFound(cls, leaf_name)
@@ -746,13 +761,13 @@ class ConfigSection(BaseModel):
         candidate_data.data[leaf_name] = value
 
     def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> None:
-        self._refuse_deleting_or_retyping_declared_field(leaf_name)
+        self._raise_deleting_or_retyping_declared_field(leaf_name)
 
     def _apply_set_type(self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any) -> None:
-        self._refuse_deleting_or_retyping_declared_field(leaf_name)
+        self._raise_deleting_or_retyping_declared_field(leaf_name)
 
     def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> None:
-        self._refuse_deleting_or_retyping_declared_field(leaf_name)
+        self._raise_deleting_or_retyping_declared_field(leaf_name)
 
     def _candidate_data_from_change_requests(
             self,
@@ -792,6 +807,7 @@ class ConfigSection(BaseModel):
          normal assignment flow.
         """
 
+        self._refuse_changes_for_overlapping_paths(requests)
         # Group changes by parent path
         changes_by_parent = self._group_changes_by_parent(requests)
         # Ensure no change happens on a frozen field/section
