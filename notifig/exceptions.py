@@ -83,3 +83,11 @@ class FlagIsReserved(ValueError):
             f"'{','.join(flags)}' {'are' if len(flags) > 1 else 'is'}"
             f"reserved by the CLI parser and can't be used as flags."
         )
+
+
+class CantDeleteRetypeDeclaredField(AttributeError):
+    def __init__(self, model: type[BaseModel], field_name: str) -> None:
+        super().__init__(
+            f"{field_name!r} is a declared field of {model.__name__!r} and"
+            f" can't be deleted or change its type"
+        )

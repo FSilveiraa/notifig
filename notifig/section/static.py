@@ -4,18 +4,18 @@ import asyncio
 import functools
 import inspect
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import replace, dataclass
-from typing import TYPE_CHECKING, Any, Self, TypeIs
+from dataclasses import replace, dataclass, field
+from typing import TYPE_CHECKING, Any, Self, TypeIs, NoReturn, assert_never
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import InitErrorDetails
 
 from ..annotation.cli_flags import CLIFlags
-from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound
+from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound, CantDeleteRetypeDeclaredField
 from ..utils import split_parent_path_and_leaf
 from ..write.notification import ConfigChange, Created, Deleted, Updated
-from ..write.request import ChangeRequest, Assign
+from ..write.request import ChangeRequest, Assign, Delete, SetType, RemoveType
 
 # Model configs used by pydantic to inform model validation.
 # Forces model re-validation on re-assignment and allows arbitrary types.
@@ -35,10 +35,16 @@ _MUTABLE = ConfigDict(
 class _ChangeGroup:
     # Common parent path of each change
     parent_path: str
-    # Changes to be applied to leaves of parent
-    change_requests_by_leaf_name: dict[str, ChangeRequest]
     # The parent section for the path's leaf
     parent_section: ConfigSection
+    # Changes to be applied to leaves of parent
+    change_requests_by_leaf_name: dict[str, ChangeRequest] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _CandidateData:
+    data: dict[str, Any] = field(default_factory=dict)
+    unresolved: dict[str, Any] = field(default_factory=dict)
 
 
 def matches_prefix(path: str, prefix: str) -> bool:
@@ -681,7 +687,6 @@ class ConfigSection(BaseModel):
                 # First change for this parent.
                 change_group_for_parent = changes_by_parent[parent_path] = _ChangeGroup(
                     parent_path=parent_path,
-                    change_requests_by_leaf_name={},
                     parent_section=parent_section,
                 )
             change_group_for_parent.change_requests_by_leaf_name[leaf_name] = change_request
@@ -727,6 +732,46 @@ class ConfigSection(BaseModel):
                 title=cls.__name__,
                 line_errors=line_errors,
             )
+
+    def _start_candidate_data(self) -> _CandidateData:
+        return _CandidateData(data=dict(self))
+
+    @classmethod
+    def _refuse_deleting_or_retyping_declared_field(cls, leaf_name: str) -> NoReturn:
+        if leaf_name in cls.model_fields:
+            raise CantDeleteRetypeDeclaredField(cls, leaf_name)
+        raise PathNotFound(cls, leaf_name)
+
+    def _apply_assign(self, candidate_data: _CandidateData, leaf_name: str, value: Any) -> None:
+        candidate_data.data[leaf_name] = value
+
+    def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> None:
+        self._refuse_deleting_or_retyping_declared_field(leaf_name)
+
+    def _apply_set_type(self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any) -> None:
+        self._refuse_deleting_or_retyping_declared_field(leaf_name)
+
+    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> None:
+        self._refuse_deleting_or_retyping_declared_field(leaf_name)
+
+    def _candidate_data_from_change_requests(
+            self,
+            change_requests: dict[str, ChangeRequest],
+    ) -> _CandidateData:
+        candidate_data = self._start_candidate_data()
+        for leaf_name, change_request in change_requests.items():
+            match change_request:
+                case Assign(value=value):
+                    self._apply_assign(candidate_data, leaf_name, value)
+                case Delete():
+                    self._apply_delete(candidate_data, leaf_name)
+                case SetType(entry_type=entry_type):
+                    self._apply_set_type(candidate_data, leaf_name, entry_type)
+                case RemoveType():
+                    self._apply_remove_type(candidate_data, leaf_name)
+                case _:
+                    assert_never(change_request)
+        return candidate_data
 
 
     def _validate_and_commit_changes(self, requests: list[ChangeRequest]):

@@ -29,6 +29,7 @@ from .exceptions import (
     EntryRequiresData,
     NotASection,
     PathNotFound,
+    CantDeleteRetypeDeclaredField,
 )
 from .meta import ConfigDict
 from .section.dynamic import DynamicSection
@@ -52,6 +53,7 @@ __all__ = [
     "PathNotFound",
     "NotASection",
     "EntryRequiresData",
+    "CantDeleteRetypeDeclaredField",
     "AsyncObserversNotCalled",
     "FILE_EXTENSIONS",
     "UnknownFormat",

@@ -16,9 +16,9 @@ from pydantic import (
 )
 from pydantic.fields import FieldInfo
 
-from ..exceptions import EntryRequiresData, PathNotFound
+from ..exceptions import EntryRequiresData, PathNotFound, CantDeleteRetypeDeclaredField
 from ..write.notification import ConfigChange, Created, Deleted, Updated
-from .static import _MUTABLE, ConfigSection
+from .static import _MUTABLE, ConfigSection, _CandidateData
 
 # Like _MUTABLE, but the section accepts keys it does not declare. A dynamic
 #  section keeps its entries there, so they can't be rejected as unknown.
@@ -411,6 +411,59 @@ class DynamicSection[T](ConfigSection):
         yield name, FieldInfo.from_annotation(cls._entry_type)
         if rest:
             yield f"{name}.{rest}", FieldInfo.from_annotation(Any)
+
+    @override
+    def _start_candidate_data(self) -> _CandidateData:
+        return _CandidateData(
+            data=dict(self),
+            unresolved=dict(self._unresolved)
+        )
+
+    @override
+    def _apply_assign(self, candidate_data: _CandidateData, leaf_name: str, value: Any) -> None:
+        # 1. Declared field, gets validated by the candidate's annotation
+        if leaf_name in type(self).model_fields:
+            candidate_data.data[leaf_name] = value
+        # 2. Typed dynamic entry, get type from candidate data
+        elif leaf_name in candidate_data.data:
+            entry_type = type(candidate_data.data[leaf_name])
+            # Types don't match, use Pydantic's caster
+            if not isinstance(value, entry_type):
+                value = TypeAdapter(entry_type).validate_python(value)
+        # 3. Unresolved entry, entry type is pydantic model, validate
+        #  from pydantic
+        elif _is_pydantic_model(self._entry_type):
+            candidate_data.data[leaf_name] = TypeAdapter(self._entry_type).validate_python(value)
+            candidate_data.unresolved.pop(leaf_name, None)
+        # 4. Unresolved entry, entry type isn't bu
+
+        if leaf_name in self._unresolved:
+            candidate_data.unresolved[leaf_name] = value
+        else:
+            candidate_data.data[leaf_name] = value
+
+    @override
+    def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> None:
+        # Refuse deleting a declared field
+        if leaf_name in type(self).model_fields:
+            raise CantDeleteRetypeDeclaredField(type(self), leaf_name)
+        # Try deleting from typed data first, then unresolved data
+        try:
+            del candidate_data.data[leaf_name]
+        except KeyError:
+            try:
+                del candidate_data.unresolved[leaf_name]
+            except KeyError:
+                raise PathNotFound(type(self), leaf_name)
+
+    @override
+    def _apply_set_type(self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any) -> None:
+        raise NotImplemented
+
+    @override
+    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> None:
+        raise NotImplemented
+
 
 
 def _entry_name_error(name: str) -> ValueError:
