@@ -801,6 +801,57 @@ class ConfigSection(BaseModel):
         return candidate_data
 
 
+    @staticmethod
+    def _fix_notification_values(
+            events_by_leaf_name: dict[str, ConfigChange],
+            candidate: ConfigSection,
+            parent_path: str,
+    ) -> list[ConfigChange]:
+        """
+        Takes the notifications for each leaf of a parent, corrects
+        their values to reflect post-validation.
+        Example that should come up in a test:
+        ```
+        class ApiSection(ConfigSection):
+            port: int = Field(default=8000)
+
+        # The input value is different, but the end value is the same
+        ApiSection().port="8000"
+        ```
+        """
+        fixed_notifications: list[ConfigChange] = []
+        for leaf_name, event in events_by_leaf_name.items():
+            # The paths passed by _apply_* methods are just the leaf name
+            path = f"{parent_path}.{leaf_name}" if parent_path else leaf_name
+            try:
+                value = candidate[leaf_name]
+            except KeyError:
+                # If the leaf is an untyped entry, validators don't run
+                #  on it and the final value is already correct, just
+                #  fix the path.
+                # NOTE: this means the `case Deleted()` below will never
+                #  actually run.
+                fixed_notifications.append(replace(event, path=path))
+                continue
+            match event:
+                case Created():
+                    fixed_notifications.append(
+                        replace(event, path=path, value=value)
+                    )
+                case Updated(before=before):
+                    if value == before:
+                        # No real change happened, don't send a notification
+                        continue
+                    fixed_notifications.append(
+                        replace(event, path=path, after=value)
+                    )
+                case Deleted():
+                    fixed_notifications.append(
+                        replace(event, path=path)
+                    )
+        return fixed_notifications
+
+
     def _validate_and_commit_changes(self, requests: list[ChangeRequest]):
         """
         Single entrypoint for all updates/deletions to section tree.
