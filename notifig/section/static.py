@@ -881,11 +881,13 @@ class ConfigSection(BaseModel):
             else:
                 self.__pydantic_fields_set__.add(leaf_name)
         # Mark ancestors as set and set self as the parent for subsections
-        self._mark_ancestors_as_set()
-        self._stamp_parent_on_subsections()
+        if candidate_data.events_by_leaf:
+            self._mark_ancestors_as_set()
+        # HACK: mypy refuses treating a model_validator method as a callable without this
+        self._stamp_parent_on_subsections()  # type: ignore[operator]
 
 
-    def _validate_and_commit_changes(self, requests: list[ChangeRequest]):
+    def _validate_and_commit_changes(self, requests: list[ChangeRequest]) -> list[Awaitable]:
         """
         Single entrypoint for all updates/deletions to section tree.
         Changes are validated as an atomic batch using validation candidates.
@@ -945,12 +947,15 @@ class ConfigSection(BaseModel):
             )
 
         # Batch succeeded, commit changes and send notifications
+        all_notifications: list[ConfigChange] = []
         for change_group, candidate_data, validation_candidate in validated_change_group_data_and_candidates:
             change_group.parent_section._commit_candidate(
                 candidate=validation_candidate,
                 candidate_data=candidate_data,
             )
+            all_notifications.extend(candidate_data.events_by_leaf.values())
 
+        return self._notify(*all_notifications)
 
 
     ###########################################################################
