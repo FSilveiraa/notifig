@@ -50,6 +50,8 @@ class _CandidateData:
     unresolved: dict[str, Any] = field(default_factory=dict)
     # Name of entries built from model defaults, must not be marked as set
     built_from_defaults: set[str] = field(default_factory=set)
+    # Events for each leaf
+    events_by_leaf: dict[str, ConfigChange] = field(default_factory=dict)
 
 
 class ConfigSection(BaseModel):
@@ -773,7 +775,7 @@ class ConfigSection(BaseModel):
     def _apply_set_type(self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any) -> Created | Updated | None:
         self._raise_deleting_or_retyping_declared_field(leaf_name)
 
-    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted | None:
+    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted:
         self._raise_deleting_or_retyping_declared_field(leaf_name)
 
     def _candidate_data_from_change_requests(
@@ -782,17 +784,20 @@ class ConfigSection(BaseModel):
     ) -> _CandidateData:
         candidate_data = self._start_candidate_data()
         for leaf_name, change_request in change_requests.items():
+            event: ConfigChange | None = None
             match change_request:
                 case Assign(value=value):
-                    self._apply_assign(candidate_data, leaf_name, value)
+                    event = self._apply_assign(candidate_data, leaf_name, value)
                 case Delete():
-                    self._apply_delete(candidate_data, leaf_name)
+                    event = self._apply_delete(candidate_data, leaf_name)
                 case SetType(entry_type=entry_type):
-                    self._apply_set_type(candidate_data, leaf_name, entry_type)
+                    event = self._apply_set_type(candidate_data, leaf_name, entry_type)
                 case RemoveType():
-                    self._apply_remove_type(candidate_data, leaf_name)
+                    event = self._apply_remove_type(candidate_data, leaf_name)
                 case _:
                     assert_never(change_request)
+            if event is not None:
+                candidate_data.events_by_leaf[leaf_name] = event
         return candidate_data
 
 

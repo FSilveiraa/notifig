@@ -492,7 +492,7 @@ class DynamicSection[T](ConfigSection):
         if current_entry is not None:
             if type(current_entry) is entry_type:
                 # Same type: keep the built entry, so it keeps its observers
-                return
+                return None
             else:
                 # Dump the entry into raw data
                 raw_data = TypeAdapter(type(current_entry)).dump_python(
@@ -519,10 +519,13 @@ class DynamicSection[T](ConfigSection):
         # The entry is now typed so it moves to `data` and leaves `unresolved` if it's there
         candidate_data.data[leaf_name] = new_entry
         candidate_data.unresolved.pop(leaf_name, None)
+        if current_entry is None:
+            return Created(path=leaf_name, value=new_entry)
+        return Updated(path=leaf_name, before=current_entry, after=new_entry)
 
 
     @override
-    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted | None:
+    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted:
         """Un-types `leaf_name` into `candidate_data.unresolved`."""
         # Refuse removing the type for a declared field
         if leaf_name in type(self).model_fields:
@@ -536,3 +539,4 @@ class DynamicSection[T](ConfigSection):
         candidate_data.unresolved[leaf_name] = TypeAdapter(type(entry)).dump_python(
             entry, mode="json", exclude_unset=True
         )
+        return Deleted(path=leaf_name, value=entry)
