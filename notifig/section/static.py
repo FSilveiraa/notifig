@@ -807,14 +807,43 @@ class ConfigSection(BaseModel):
          normal assignment flow.
         """
 
+        # HACK: local import to avoid import cycle.
+        # validation.py import static.py so validation candidates can inherit ConfigSection,
+        #  and static.py imports validation.py here to build a candidate from change request data.
+        from .validation import candidate_class_from_section_class
+
         self._refuse_changes_for_overlapping_paths(requests)
         # Group changes by parent path
         changes_by_parent = self._group_changes_by_parent(requests)
-        # Ensure no change happens on a frozen field/section
+
+        validated_change_group_data_and_candidates: list[tuple[_ChangeGroup, _CandidateData, ConfigSection]] = []
+
         for change_group in changes_by_parent.values():
-            change_group.parent_section._refuse_writing_to_frozen_fields(
-                change_group.change_requests_by_leaf_name
+            parent_section = change_group.parent_section
+            section_changes = change_group.change_requests_by_leaf_name
+            # Ensure no change happens on a frozen field/section
+            parent_section._refuse_writing_to_frozen_fields(section_changes)
+            # Build data for validation candidate by applying changes to parent data
+            candidate_data = parent_section._candidate_data_from_change_requests(section_changes)
+            # Find all declared fields with changes
+            changed_declared_fields = frozenset(
+                name for name in section_changes.keys()
+                if name in type(parent_section).model_fields
             )
+            # Get the validation candidate class that skips validators for unchanged fields
+            validation_candidate_class = candidate_class_from_section_class(
+                section_class=type(parent_section),
+                written_field_names=changed_declared_fields,
+            )
+            # Build the candidate from the candidate class and final data
+            validation_candidate = validation_candidate_class.model_validate(
+                candidate_data.data
+            )
+            # Preserve the change group, the candidate data and the candidate itself
+            validated_change_group_data_and_candidates.append(
+                (change_group, candidate_data, validation_candidate)
+            )
+
 
 
     ###########################################################################

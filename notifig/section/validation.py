@@ -12,6 +12,7 @@ from pydantic import (
 from pydantic.fields import FieldInfo
 
 from .static import ConfigSection
+from .dynamic import DynamicSection
 
 
 class ValidationSection(ConfigSection):
@@ -32,6 +33,27 @@ class ValidationSection(ConfigSection):
         return self
 
 
+class DynamicValidationSection(ValidationSection, DynamicSection):
+    """
+    This class exists only because DynamicSection has a model_validator
+    named `_instantiate_entries` that turns the values of dynamic fields
+    into dynamic entries typed after its default entry type.
+    For validation candidates, the entry values are already built into
+    their final types by the `_apply_*` methods, which we want to keep
+    because there the **current** entry type is known.
+    We don't want the model validator to try to force this final data into
+    the default entry type in the validation candidate, so we override it
+    and just adopt the default Pydantic behavior.
+    TODO: overall review this behavior, consider moving type coercion out
+     of a model validator.
+    """
+    @override
+    @model_validator(mode="wrap")
+    @classmethod
+    def _instantiate_entries(cls, data: Any, handler) -> Any:
+        return handler(data)
+
+
 # NOTE: we usually don't cache things since it's cheap to rebuild
 #  and allows for dynamics, but this is building schema from schema
 @functools.cache
@@ -39,7 +61,13 @@ def _candidate_base_class(section_class: type[ConfigSection]) -> type[ConfigSect
     """The candidate behaviour every batch on `section_class` shares,
     whatever fields it writes."""
 
-    class ValidationCandidate(ValidationSection, section_class):  # type: ignore[valid-type, misc]
+    validation_section_class = (
+        DynamicValidationSection
+        if issubclass(section_class, DynamicSection)
+        else ValidationSection
+    )
+
+    class ValidationCandidate(validation_section_class, section_class):  # type: ignore[valid-type, misc]
         # Copy the python module path
         __module__ = section_class.__module__
         # NOTE: use pydantic's own ConfigDict, ours only has extras that can
