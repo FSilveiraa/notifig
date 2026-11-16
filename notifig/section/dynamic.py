@@ -422,46 +422,67 @@ class DynamicSection[T](ConfigSection):
         )
 
     @override
-    def _apply_assign(self, candidate_data: _CandidateData, leaf_name: str, value: Any) -> None:
+    def _apply_assign(
+            self,
+            candidate_data: _CandidateData,
+            leaf_name: str,
+            value: Any
+    ) -> Created | Updated | None:
         """Sets the value of `leaf_name` to `value` in `candidate_data`."""
-        # 1. Declared field, gets validated by the candidate's annotation
-        if leaf_name in type(self).model_fields:
-            candidate_data.data[leaf_name] = value
-        # 2. Typed dynamic entry, get type from candidate data
-        elif leaf_name in candidate_data.data:
-            entry_type = type(candidate_data.data[leaf_name])
-            # Types don't match, use Pydantic's caster
-            if not isinstance(value, entry_type):
-                value = TypeAdapter(entry_type).validate_python(value)
-            candidate_data.data[leaf_name] = value
-        # 3. Unresolved entry, entry type is pydantic model, validate
-        #  from pydantic adapter
-        elif is_pydantic_model(self._entry_type):
-            candidate_data.data[leaf_name] = TypeAdapter(self._entry_type).validate_python(value)
-            candidate_data.unresolved.pop(leaf_name, None)
-        # 4. Unresolved entry, entry type isn't buildable, keep in unresolved
+        try:
+            # Declared field or typed dynamic entry
+            before = candidate_data.data[leaf_name]
+        except KeyError:
+            # New dynamic entry, or update for untyped dynamic entry
+            try:
+                before = candidate_data.unresolved[leaf_name]
+                _exists = True
+            except KeyError:
+                before = None
+                _exists = False
+            # Default entry type is a pydantic model, rebuild `value` as an instance
+            #  pydantic's using type adapter
+            if is_pydantic_model(self._entry_type):
+                value = TypeAdapter(self._entry_type).validate_python(value)
+                candidate_data.data[leaf_name] = value
+                candidate_data.unresolved.pop(leaf_name, None)
+            # Default entry type is not buildable, keep in unresolved
+            else:
+                candidate_data.unresolved[leaf_name] = value
+            if not _exists:
+                return Created(path=leaf_name, value=value)
         else:
-            candidate_data.unresolved[leaf_name] = value
+            # If it's a dynamic entry and the types don't match, build the
+            #  new instance using the type of the existing one.
+            # Because if it's a declared entry, pydantic's validators will handle it
+            if (
+                    leaf_name not in type(self).model_fields
+                    and not isinstance(value, type(before))
+               ):
+                value = TypeAdapter(type(before)).validate_python(value)
+            candidate_data.data[leaf_name] = value
+        return None if before == value else Updated(path=leaf_name, before=before, after=value)
 
     @override
-    def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> None:
+    def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted:
         """Removes `leaf_name` from `candidate_data`."""
         # Refuse deleting a declared field
         if leaf_name in type(self).model_fields:
             raise CantDeleteRetypeDeclaredField(type(self), leaf_name)
         # Try deleting from typed data first, then unresolved data
         try:
-            del candidate_data.data[leaf_name]
+            value = candidate_data.data.pop(leaf_name)
         except KeyError:
             try:
-                del candidate_data.unresolved[leaf_name]
+                value = candidate_data.unresolved.pop(leaf_name)
             except KeyError:
                 raise PathNotFound(type(self), leaf_name) from None
+        return Deleted(path=leaf_name, value=value)
 
     @override
     def _apply_set_type(
             self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any
-    ) -> None:
+    ) -> Created | Updated | None:
         """Sets `entry_type` as the type for `leaf_name` in `candidate_data`. """
         # Refuse re-typing a declared field
         if leaf_name in type(self).model_fields:
@@ -501,7 +522,7 @@ class DynamicSection[T](ConfigSection):
 
 
     @override
-    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> None:
+    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted | None:
         """Un-types `leaf_name` into `candidate_data.unresolved`."""
         # Refuse removing the type for a declared field
         if leaf_name in type(self).model_fields:

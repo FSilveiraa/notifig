@@ -757,16 +757,23 @@ class ConfigSection(BaseModel):
             raise CantDeleteRetypeDeclaredField(cls, leaf_name)
         raise PathNotFound(cls, leaf_name)
 
-    def _apply_assign(self, candidate_data: _CandidateData, leaf_name: str, value: Any) -> None:
+    def _apply_assign(
+            self,
+            candidate_data: _CandidateData,
+            leaf_name: str,
+            value: Any
+    ) -> Created | Updated | None:
+        before = candidate_data.data[leaf_name]
         candidate_data.data[leaf_name] = value
+        return None if before == value else Updated(path=leaf_name, before=before, after=value)
 
-    def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> None:
+    def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted:
         self._raise_deleting_or_retyping_declared_field(leaf_name)
 
-    def _apply_set_type(self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any) -> None:
+    def _apply_set_type(self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any) -> Created | Updated | None:
         self._raise_deleting_or_retyping_declared_field(leaf_name)
 
-    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> None:
+    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted | None:
         self._raise_deleting_or_retyping_declared_field(leaf_name)
 
     def _candidate_data_from_change_requests(
@@ -831,14 +838,12 @@ class ConfigSection(BaseModel):
                 if name in type(parent_section).model_fields
             )
             # Get the validation candidate class that skips validators for unchanged fields
-            validation_candidate_class = candidate_class_from_section_class(
+            validation_class = candidate_class_from_section_class(
                 section_class=type(parent_section),
                 written_field_names=changed_declared_fields,
             )
             # Build the candidate from the candidate class and final data
-            validation_candidate = validation_candidate_class.model_validate(
-                candidate_data.data
-            )
+            validation_candidate = validation_class.model_validate(candidate_data.data)
             # Preserve the change group, the candidate data and the candidate itself
             validated_change_group_data_and_candidates.append(
                 (change_group, candidate_data, validation_candidate)
