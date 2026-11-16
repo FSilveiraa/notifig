@@ -540,3 +540,32 @@ class DynamicSection[T](ConfigSection):
             entry, mode="json", exclude_unset=True
         )
         return Deleted(path=leaf_name, value=entry)
+
+
+    @override
+    def _commit_candidate(
+            self,
+            candidate: ConfigSection,
+            candidate_data: _CandidateData,
+    ) -> None:
+        """
+        Sets dynamic entries first, then passes the data to ConfigSection
+        to set the declared fields and do the rest of the maintenance
+        """
+        live_dynamic_entries = self.__pydantic_extra__
+        candidate_dynamic_entries = candidate.__pydantic_extra__ or {}
+        assert live_dynamic_entries is not None
+        # Delete from this section the dynamic entries missing from
+        #  the candidate. Iterate a copy, to avoid altering the list
+        #  we're iterating
+        for name in list(live_dynamic_entries.keys()):
+            if name not in candidate_dynamic_entries:
+                del live_dynamic_entries[name]
+        # Add new or updated dynamic entries
+        for name, value in candidate_dynamic_entries.items():
+            if name not in live_dynamic_entries or live_dynamic_entries[name] != value:
+                live_dynamic_entries[name] = value
+        # Copy unresolved entries. The candidate's unresolved is always empty
+        #  since we never write to it, use candidate_data.unresolved
+        self._unresolved = candidate_data.unresolved
+        super()._commit_candidate(candidate, candidate_data)

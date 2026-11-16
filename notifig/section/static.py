@@ -806,7 +806,7 @@ class ConfigSection(BaseModel):
             events_by_leaf_name: dict[str, ConfigChange],
             candidate: ConfigSection,
             parent_path: str,
-    ) -> list[ConfigChange]:
+    ) -> None:
         """
         Takes the notifications for each leaf of a parent, corrects
         their values to reflect post-validation.
@@ -819,8 +819,8 @@ class ConfigSection(BaseModel):
         ApiSection().port="8000"
         ```
         """
-        fixed_notifications: list[ConfigChange] = []
-        for leaf_name, event in events_by_leaf_name.items():
+        # Copy the dict before to avoid altering it mid-iteration
+        for leaf_name, event in dict(events_by_leaf_name).items():
             # The paths passed by _apply_* methods are just the leaf name
             path = f"{parent_path}.{leaf_name}" if parent_path else leaf_name
             try:
@@ -831,25 +831,58 @@ class ConfigSection(BaseModel):
                 #  fix the path.
                 # NOTE: this means the `case Deleted()` below will never
                 #  actually run.
-                fixed_notifications.append(replace(event, path=path))
+                events_by_leaf_name[leaf_name] = replace(event, path=path)
                 continue
             match event:
                 case Created():
-                    fixed_notifications.append(
-                        replace(event, path=path, value=value)
-                    )
+                    events_by_leaf_name[leaf_name] = replace(event, path=path, value=value)
                 case Updated(before=before):
                     if value == before:
                         # No real change happened, don't send a notification
-                        continue
-                    fixed_notifications.append(
-                        replace(event, path=path, after=value)
-                    )
+                        del events_by_leaf_name[leaf_name]
+                    else:
+                        events_by_leaf_name[leaf_name] = replace(event, path=path, after=value)
                 case Deleted():
-                    fixed_notifications.append(
-                        replace(event, path=path)
-                    )
-        return fixed_notifications
+                    events_by_leaf_name[leaf_name] = replace(event, path=path)
+
+
+    def _commit_candidate(
+            self,
+            candidate: ConfigSection,
+            candidate_data: _CandidateData,
+    ) -> None:
+        """
+        Copies every declared field from the validation candidate into
+         this live section, then marks those fields as explicitly set,
+         marks the parent on each sub-section and marks each ancestor
+         section as set.
+        The reason it has to repeat so much work that building a config
+         normally already does is that the only way to set all final
+         values on a section at once, and validate an entire batch before
+         writing to the live section, while avoiding re-running validators,
+         is to write the final post-validation values into __dict__.
+         Also the parent and sub-section stamping is something the validation
+         candidate explicitly skips, so it has to be done here.
+        NOTE: this assumes CandidateData has had its notifications map fixed
+        """
+        # Copy declared fields that changed
+        # Not just the ones from the changes, since a before model_validator
+        #  could have written to a separate field
+        for field_name in type(self).model_fields:
+            if (candidate_value := candidate[field_name]) != self[field_name]:
+                self.__dict__[field_name] = candidate_value
+        # Set which fields changed on this section
+        # Notification changes only contain the actual changed paths,
+        #  after ignoring some, so use them to figure out which fields
+        #  actually changed
+        for leaf_name, event in candidate_data.events_by_leaf.items():
+            if isinstance(event, Deleted) or leaf_name in candidate_data.built_from_defaults:
+                self.__pydantic_fields_set__.discard(leaf_name)
+            else:
+                self.__pydantic_fields_set__.add(leaf_name)
+        # Mark ancestors as set and set self as the parent for subsections
+        self._mark_ancestors_as_set()
+        self._stamp_parent_on_subsections()
 
 
     def _validate_and_commit_changes(self, requests: list[ChangeRequest]):
@@ -900,9 +933,22 @@ class ConfigSection(BaseModel):
             )
             # Build the candidate from the candidate class and final data
             validation_candidate = validation_class.model_validate(candidate_data.data)
+            # Fix notifications to have correct paths and values
+            self._fix_notification_values(
+                events_by_leaf_name=candidate_data.events_by_leaf,
+                candidate=validation_candidate,
+                parent_path=change_group.parent_path,
+            )
             # Preserve the change group, the candidate data and the candidate itself
             validated_change_group_data_and_candidates.append(
                 (change_group, candidate_data, validation_candidate)
+            )
+
+        # Batch succeeded, commit changes and send notifications
+        for change_group, candidate_data, validation_candidate in validated_change_group_data_and_candidates:
+            change_group.parent_section._commit_candidate(
+                candidate=validation_candidate,
+                candidate_data=candidate_data,
             )
 
 
