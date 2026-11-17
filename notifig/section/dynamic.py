@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Iterator
 from types import GenericAlias
 from typing import Any, ClassVar, TypeVar, override
@@ -10,17 +9,17 @@ from pydantic import (
     ConfigDict,
     PrivateAttr,
     TypeAdapter,
-    ValidationError,
     model_serializer,
     model_validator,
 )
 from pydantic.fields import FieldInfo
 
-from ..exceptions import EntryRequiresData, PathNotFound, CantDeleteRetypeDeclaredField, InvalidEntryName, \
+from ..exceptions import PathNotFound, CantDeleteRetypeDeclaredField, InvalidEntryName, \
     entry_requires_data_when_fields_are_missing
 from ..utils import is_pydantic_model
-from ..write.notification import ConfigChange, Created, Deleted, Updated
-from .static import _MUTABLE, ConfigSection, _CandidateData
+from ..write.notification import Created, Deleted, Updated
+from ..write.request import ChangeRequest, RemoveType, SetType
+from .static import _MUTABLE, ConfigSection, _CandidateData, _run_async_observers
 
 # Like _MUTABLE, but the section accepts keys it does not declare. A dynamic
 #  section keeps its entries there, so they can't be rejected as unknown.
@@ -157,7 +156,7 @@ class DynamicSection[T](ConfigSection):
         `set_type()` gives the section a model to build with.
 
         Assignment re-validation hands this validator the already-built model
-        rather than a dict (writes build through `DynamicSection._set`); it
+        rather than a dict (writes build through `DynamicSection._apply_assign`); it
         passes through untouched."""
         if isinstance(data, BaseModel) or not isinstance(data, dict):
             # Assignment re-validation sees the built model; non-dict data is
@@ -171,7 +170,7 @@ class DynamicSection[T](ConfigSection):
             else:
                 pending[name] = value
 
-        # An entry's name carries no dots - see `_entry_name_error`: refused
+        # An entry's name carries no dots - see `InvalidEntryName`: refused
         #  at the door, not kept as an unreachable object.
         for name in pending:
             if "." in name:
@@ -209,8 +208,7 @@ class DynamicSection[T](ConfigSection):
         An entry the data cannot build raises `EntryRequiresData` when the data
         carries no value for a field its model declares with no default, and
         `ValidationError` when the data is there and the model refuses it. Either
-        way that entry is left as it was; entries earlier in the batch are already
-        applied, like a `set` whose later path fails.
+        way the whole batch is refused, and nothing in it is applied.
         """
         types_to_set = types
         if args:
@@ -221,106 +219,28 @@ class DynamicSection[T](ConfigSection):
                     f"`set_type` expects exactly 2 or no positional arguments, found {len(args)}: {args}."
                 )
 
-        changes: list[ConfigChange] = []
-        for name, model in types_to_set.items():
-            # An entry's name carries no dots - see `_entry_name_error`:
-            #  checked here, BEFORE anything is built or stored — a refusal
-            #  mid-loop must leave the section untouched, and
-            #  `BaseModel.__setattr__` below does not roll its write back
-            #  when `validate_assignment` rejects it.
-            if "." in name:
-                raise InvalidEntryName(name)
-            current = (self.model_extra or {}).get(name)
-            if current is not None and type(current) is model:
-                continue  # Same type, don't rebuild so sections don't lose observers
-
-            had_data = True
-            if current is not None:
-                # Different type for existing typed entry,
-                # serialize to data and rebuild
-                data = TypeAdapter(type(current)).dump_python(
-                    current,
-                    mode="json",
-                    exclude_unset=True,
-                )
-            elif name in self._unresolved:
-                # New type for untyped entry, use data from `_unresolved`
-                data = self._unresolved[name]
-            elif isinstance(model, type) and issubclass(model, BaseModel):
-                # No data available, but the type is a pydantic model,
-                #  build it from defaults (empty args)
-                data = {}
-                had_data = False
-            else:
-                # Nothing matches `name`, raise
-                raise PathNotFound(type(self), name)
-            # Build the entry before removing what it replaces: a model that refuses
-            #  the data has to leave the section exactly as it was.
-            try:
-                new_entry = TypeAdapter(model).validate_python(data)
-            except ValidationError as error:
-                # A field with no default that the data doesn't carry is a type this
-                #  data cannot build, and a caller is allowed to decide what that
-                #  means; a value the type actually refuses is the data's own error
-                #  and stays a ValidationError.
-                missing_fields = _missing_fields(error)
-                if not missing_fields:
-                    raise
-                raise EntryRequiresData(model, name, missing_fields) from error
-            if current is not None:
-                BaseModel.__delattr__(self, name)
-            else:
-                self._unresolved.pop(name, None)
-            BaseModel.__setattr__(self, name, new_entry)
-
-            # If the new entry was built from model defaults, unmark it
-            #  as user-set after the __setattr__ marks it as set.
-            if not had_data:
-                self.__pydantic_fields_set__.discard(name)  # a default is not user-set
-
-            changes.append(
-                Created(path=name, value=new_entry)
-                if current is None
-                else Updated(path=name, before=current, after=new_entry)
-            )
-        return self._notify(*changes)
+        requests: list[ChangeRequest] = [
+            SetType(path=path, entry_type=entry_type)
+            for path, entry_type in types_to_set.items()
+        ]
+        return self._validate_and_commit_changes(requests)
 
     async def set_type_and_wait(self, *args, **types: Any) -> None:
-        """
-        `set_type`, and also run the async observers it returns.
-        """
-        pending = self.set_type(*args, **types)
-        if not pending:
-            return
-        failures: list[Exception] = []
-        for result in await asyncio.gather(*pending, return_exceptions=True):
-            if isinstance(result, Exception):
-                failures.append(result)
-            # Cancellation or similar: propagate, don't collect
-            elif isinstance(result, BaseException):
-                raise result
-        if failures:
-            raise ExceptionGroup("Config observers failed", failures)
+        """`set_type`, and also run the async observers it returns."""
+        await _run_async_observers(self.set_type(*args, **types))
 
     def remove_type(self, *names: str) -> list[Awaitable]:
         """
         Send entries back to `unresolved` as untyped data, keeping their values.
-        Distinct from `delete/__delattr__` which also remove the data. Notified
+        Distinct from `delete()`/`__delattr__`, which also remove the data. Notified
         once for the whole batch; returns the async observers' coroutines.
         """
-        changes: list[ConfigChange] = []
-        for name in names:
-            entry = (self.model_extra or {}).get(name)
-            if entry is None:
-                raise PathNotFound(type(self), name)
-            self._unresolved[name] = TypeAdapter(type(entry)).dump_python(
-                entry,
-                mode="json",
-                exclude_unset=True,
-            )
-            BaseModel.__delattr__(self, name)
-            changes.append(Deleted(path=name, value=entry))
-        return self._notify(*changes)
+        requests: list[ChangeRequest] = [RemoveType(path=path) for path in names]
+        return self._validate_and_commit_changes(requests)
+
+    async def remove_type_and_wait(self, *names: str) -> None:
+        """`remove_type`, and also run the async observers it returns."""
+        await _run_async_observers(self.remove_type(*names))
 
     @property
     def unresolved(self) -> list[str]:
@@ -328,69 +248,11 @@ class DynamicSection[T](ConfigSection):
         return list(self._unresolved)
 
     @override
-    def _set(self, name: str, value: Any) -> Any:
-        """
-        Writes `self.name = value` on a dynamic section.
-
-        A declared field goes to the base. An entry that already exists is typed
-        by its own class. A name the section doesn't hold is built as the
-        section's entry type, or, if that type isn't a model, kept in
-        `_unresolved` as written.
-        """
-        # 1. A declared field
-        if name in type(self).model_fields:
-            return super()._set(name, value)
-
-        # An entry's name carries no dots: `section["a.b"]` navigates to `b`
-        #  inside `a`, so a name with a dot in it could never be read back —
-        #  not by `[]`, not as an attribute, not by a dotted path. Refusing
-        #  here is what makes "the dot always navigates" unambiguous.
-        if "." in name:
-            raise InvalidEntryName(name)
-
-        # 2. An entry that already exists: its own class types the value
-        entries = self.model_extra or {}
-        if name in entries:
-            entry_type = type(entries[name])
-            # NOTE: `type()` of a value from a parametrized container only gives
-            #  the container; a `tuple[int, ...]` entry is checked as a `tuple`,
-            #  not its items.
-            if not isinstance(value, entry_type):
-                value = TypeAdapter(entry_type).validate_python(value)
-            return super()._set(name, value)
-
-        # 3. If the entry type isn't a model, update `unresolved`
-        if not is_pydantic_model(self._entry_type):
-            before = self._unresolved.get(name)
-            self._unresolved[name] = value
-            self._mark_ancestors_as_set()
-            return before
-
-        # 4. Otherwise the entry type is a model: build the entry from the value
-        entry = TypeAdapter(self._entry_type).validate_python(value)
-        before = self._unresolved.pop(name, None)
-        # `BaseModel.__setattr__` on purpose: it re-runs `validate_assignment`, which is
-        #  what stamps the entry's `_name` through `_stamp_parent_on_subsections` and
-        #  what puts the name into `__pydantic_fields_set__` so `/config save` keeps it.
-        #  Through `self.__setattr__` it would route straight back into this method.
-        BaseModel.__setattr__(self, name, entry)
-        self._mark_ancestors_as_set()
-        return before
-
-    @override
-    def _delete(self, name: str) -> Any:
-        if name in self._unresolved:
-            value = self._unresolved.pop(name)
-            self._mark_ancestors_as_set()
-            return value
-        if name in (self.model_extra or {}):
-            value = self[name]
-            # not super().__delattr__ since that routes back into _delete
-            BaseModel.__delattr__(self, name)
-            self.__pydantic_fields_set__.discard(name)
-            self._mark_ancestors_as_set()
-            return value
-        return super()._delete(name)  # declared or absent: the base's refusal
+    def __eq__(self, other: object) -> bool:
+        """Untyped entries are data too, though they live in a private attribute."""
+        if not isinstance(other, DynamicSection):
+            return NotImplemented
+        return super().__eq__(other) and self._unresolved == other._unresolved
 
     @override
     @classmethod

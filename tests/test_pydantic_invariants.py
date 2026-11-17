@@ -21,6 +21,7 @@ from pydantic import TypeAdapter, ValidationError
 from notifig import Config, ConfigSection
 from notifig.section.dynamic import DynamicSection
 from notifig.section.static import ConfigSection as BaseSection
+from notifig.section.validation import candidate_class_from_section_class
 
 
 def test_t1_generic_metadata_carries_the_subscript_argument():
@@ -208,9 +209,9 @@ def test_t1_model_validate_keeps_section_instances_by_identity():
         api: Api
 
     settings = Settings(api=Api(), parse_cli=False)
-    candidate = Settings._validation_candidate_class().model_validate(
-        {"api": settings.api}
-    )
+    candidate = candidate_class_from_section_class(
+        Settings, frozenset({"api"})
+    ).model_validate({"api": settings.api})
     assert candidate.api is settings.api
 
 
@@ -218,7 +219,7 @@ def test_t1_a_validation_candidate_does_not_reparent_the_sections_it_is_built_fr
     """T1. `ConfigSection._stamp_parent_on_subsections` is a `model_validator`
     of mode `after`, so pydantic runs it on a candidate exactly as it runs on
     a real section. A candidate is built from the LIVE `Api` instance, so
-    without the `_is_validation_candidate` check the live `Api` would be
+    without `ValidationSection`'s override of it the live `Api` would be
     re-parented onto a throwaway object, and every `_path` computed on it
     afterwards would name the candidate instead of the config."""
 
@@ -232,7 +233,9 @@ def test_t1_a_validation_candidate_does_not_reparent_the_sections_it_is_built_fr
     api = settings.api
     assert api._parent is settings
 
-    Settings._validation_candidate_class().model_validate({"api": api})
+    candidate_class_from_section_class(
+        Settings, frozenset({"api"})
+    ).model_validate({"api": api})
 
     assert api._parent is settings
 
@@ -252,9 +255,9 @@ def test_t1_a_validation_candidate_registers_no_observer():
     settings = Settings(api=Api(), parse_cli=False)
     assert len(settings._observers) == 1  # the auto-save observer
 
-    candidate = Settings._validation_candidate_class().model_validate(
-        {"api": settings.api}
-    )
+    candidate = candidate_class_from_section_class(
+        Settings, frozenset({"api"})
+    ).model_validate({"api": settings.api})
 
     assert candidate._observers == []
 
@@ -271,8 +274,8 @@ def test_t2_a_candidate_error_names_the_original_class():
         port: int = 1
 
     with pytest.raises(ValidationError) as error:
-        Api._validation_candidate_class().model_validate(
-            {"url": "x", "port": "not-a-number"}
-        )
+        candidate_class_from_section_class(
+            Api, frozenset({"url", "port"})
+        ).model_validate({"url": "x", "port": "not-a-number"})
 
     assert str(error.value).splitlines()[0] == "1 validation error for Api"

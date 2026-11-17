@@ -80,6 +80,25 @@ def test_a_no_op_write_does_not_refuse_even_under_async_observers():
     assert heard == []
 
 
+def test_a_no_op_write_of_raw_data_over_an_equal_entry_keeps_the_entry():
+    """The raw data builds a new entry, which holds the same data as the live
+    one but none of its private bookkeeping. The two must still compare equal,
+    or the write would refuse, notify, and replace the entry with its
+    observers."""
+    settings = make_settings()
+    settings.plugins["ghost"] = {"enabled": True}
+    entry = settings.plugins["ghost"]
+    heard: list = []
+
+    @settings.plugins.on_change()
+    async def hear(_section, changes):
+        heard.extend(change.path for change in changes)
+
+    settings.plugins["ghost"] = {"enabled": True}  # already the value
+    assert settings.plugins["ghost"] is entry
+    assert heard == []
+
+
 def test_set_returns_the_async_coroutines_for_the_caller_to_run():
     settings = make_settings()
     heard: list = []
@@ -171,7 +190,7 @@ def test_unset_removes_an_entry_with_a_deleted_notification(settings):
     def hear(_section, changes):
         heard.extend(type(change).__name__ for change in changes)
 
-    settings.plugins.unset("ghost")
+    settings.plugins.delete("ghost")
     assert "ghost" not in dict(settings.plugins)
     assert heard == ["Deleted"]
 

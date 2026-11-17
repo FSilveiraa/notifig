@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import inspect
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import replace, dataclass, field
-from typing import TYPE_CHECKING, Any, Self, TypeIs, NoReturn, assert_never
+from typing import TYPE_CHECKING, Any, TypeIs, NoReturn, assert_never
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator, ValidationError
 from pydantic.fields import FieldInfo
@@ -52,6 +51,12 @@ class _CandidateData:
     built_from_defaults: set[str] = field(default_factory=set)
     # Events for each leaf
     events_by_leaf: dict[str, ConfigChange] = field(default_factory=dict)
+
+
+# What `_validate_changes` hands to `_commit_validated_changes` for each parent
+#  section: its change requests, the data the candidate was built from (with
+#  the fixed notifications), and the validated candidate.
+type _ValidatedChangeGroup = tuple[_ChangeGroup, _CandidateData, ConfigSection]
 
 
 class ConfigSection(BaseModel):
@@ -110,7 +115,7 @@ class ConfigSection(BaseModel):
         `section["api.url"]` is `section["api"]["url"]` is `section.api.url`:
         the dot always means "one level down", so a name carrying one is
         unreachable here — declared fields cannot carry dots, and dynamic
-        entries refuse them (`DynamicSection._set`). Missing names raise
+        entries refuse them (`DynamicSection._instantiate_entries`). Missing names raise
         `KeyError`: the dict protocol's own failure (`PathNotFound` stays the
         path API's)."""
         section, _dot, rest = name.partition(".")
@@ -133,9 +138,16 @@ class ConfigSection(BaseModel):
         `section.api.url = ...`. A missing intermediate section raises
         `KeyError`, never creates one: `[]` writes into the tree, it does not
         declare structure."""
-        parent, _dot, leaf = name.rpartition(".")
+        parent, leaf = split_parent_path_and_leaf(name)
         target = self[parent] if parent else self
         setattr(target, leaf, value)
+
+    def __delitem__(self, name: str) -> None:
+        """Dict-style deletion by NAME, or by a dotted PATH, with exactly the
+        semantics of `del section.api.entry`, like `__setitem__`."""
+        parent, leaf = split_parent_path_and_leaf(name)
+        target = self[parent] if parent else self
+        delattr(target, leaf)
 
     # NOTE: hidden from type checkers. A visible `__setattr__(name: str, ...)`
     #  tells them any attribute may be assigned, so `config.api.modle = "x"`
@@ -153,92 +165,53 @@ class ConfigSection(BaseModel):
             if name in self.__private_attributes__:
                 super().__setattr__(name, value)
                 return
-
-            was_present = name in self
-            # A write that changes nothing notifies nobody, so it never refuses.
-            #  Exact for fields and built entries; a raw dict that would build into
-            #  the same entry still asks, and errs loud.
-            if not was_present or self[name] != value:
-                # The walk reads only the change's path, so these are the written
-                #  values, not the entry they would build into.
-                change = (
-                    Updated(path=name, before=self[name], after=value)
-                    if was_present
-                    else Created(path=name, value=value)
-                )
-                reached = [
-                    handler
-                    for _section, handler, _paths in self._observers_for(change)
-                    if inspect.iscoroutinefunction(handler)
-                ]
-                if reached:
-                    raise AsyncObserversNotCalled(
-                        name, [getattr(h, "__name__", repr(h)) for h in reached]
-                    )
-            before = self._set(name, value)
-            # What the section holds now, which is not always what was written: a
-            #  dynamic entry is built from the value, a validated field is coerced.
-            # A name waiting for its type holds the value as written, not an entry.
-            after = self[name] if name in self else value
-            if before != after:
-                # A name that was already there is an update; one that was not is a
-                #  creation, and its observer needs the entry that was built.
-                async_callbacks = self._notify(
-                    Updated(path=name, before=before, after=after)
-                    if was_present
-                    else Created(path=name, value=after)
-                )
-                if async_callbacks:
-                    # The pre-check approved this write on the promise that no async
-                    #  observer would hear it; one registered itself mid-notification.
-                    for awaitable in async_callbacks:
-                        if inspect.iscoroutine(awaitable):
-                            awaitable.close()
-                    raise AsyncObserversNotCalled(
-                        name,
-                        [getattr(a, "__name__", repr(a)) for a in async_callbacks],
-                        applied=True,
-                    )
+            self._validate_and_commit_refusing_async_observers(
+                Assign(path=name, value=value)
+            )
 
     # `model_extra` will be None for static sections, available for dynamic ones.
     # I could have made an override in DynamicSection, but this isn't worse design.
     def __contains__(self, name: str) -> bool:
         return name in type(self).model_fields or name in (self.model_extra or {})
 
+    def __eq__(self, other: object) -> bool:
+        """
+
+        When we create a section, that runs a model validator that does 2 things
+         to each of their its (dynamic and declared):
+         - sets their _parent to their parent section
+         - sets their _name with the name they are mapped to in the parent
+        Whenever we try to apply an update to a section, the parent section is copied
+         into a validation candidate that skips that model_validator, to avoid the
+         real parent section's subsections having their _parent reference changed to
+         the candidate. If the update we're trying to apply is for an entry that also
+         happens to be a section, that means that new subsection that is built into
+         the candidate does not have _name and _parent. And if that update happens to
+         contain exactly the same data as the existing subsection, it should be
+         ignored, but instead the before-after checks look at both subsections, sees
+         their _parent/_name differs, and decides they're different sections, despite
+         being exactly the same.
+        To avoid this problem, __eq__ skips comparing private attributes, and asserts
+         2 sections are equal when their actual data matches.
+
+        NOTE: same problem exists with observers, also fixed by not comparing privates.
+        TODO: move observers to top-level root, this only fixes updates, but maintains
+         the more serious problem of observers not being copied to a replaced section.
+
+        NOTE: comparing `__dict__` relies on sections never using
+         `functools.cached_property`, which stores its value there. pydantic's
+         own `__eq__` falls back to comparing only the fields for that reason.
+        """
+        if not isinstance(other, ConfigSection):
+            return NotImplemented
+        return (
+            type(self) is type(other)
+            and self.__dict__ == other.__dict__
+            and self.__pydantic_extra__ == other.__pydantic_extra__
+        )
+
     def __or__(self, other: ConfigSection) -> dict[str, Any]:
         return dict(self) | dict(other)
-
-    @classmethod
-    @functools.cache
-    def _validation_candidate_class(cls) -> type[Self]:
-        """
-        Creates a dynamic class as a validation candidate for an altered
-        config section.
-        """
-
-        # NOTE: `type: ignore` is necessary since mypy refuses a variable as a
-        #  base class.
-        class ValidationCandidate(cls):  # type: ignore[valid-type, misc]
-            # Config inherits BaseSettings, and its constructor reads config
-            #  files, env and CLI. We don't want that to happen for validation
-            #  candidates. So use BaseModel.__init__ instead, which just
-            #  handles the data it is passed.
-            __init__ = BaseModel.__init__
-            # The Python module path for this class, otherwise it would be
-            #  the path for this file.
-            __module__ = cls.__module__
-            model_config = ConfigDict(
-                # Errors use the original class name
-                title=cls.model_config.get("title", cls.__name__),
-                # `populate_by_name=True` supposedly allows fields with aliases
-                #  to be addressable by name. The parent's model_config is merged.
-                # TODO: understand this need better
-                populate_by_name=True,
-            )
-            # Disable parent stamping and `model_post_init` checks
-            _is_validation_candidate = True
-
-        return ValidationCandidate
 
     @classmethod
     def walk_schema(cls, path: str) -> Iterator[tuple[str, FieldInfo]]:
@@ -351,63 +324,14 @@ class ConfigSection(BaseModel):
                     f"`set` expects exactly 2 or no positional arguments, found {len(args)}: {args}."
                 )
 
-        # Only paths whose value actually changed are notified about
-        changes: list[ConfigChange] = []
-        for path, value in fields_to_change.items():
-            section, leaf_name, _ = self.leaf_parent_name_and_schema(path)
-            was_present = leaf_name in section
-            before = section._set(leaf_name, value)
-            after = section[leaf_name] if leaf_name in section else value
-            if before != after:
-                changes.append(
-                    Updated(path=path, before=before, after=after)
-                    if was_present
-                    else Created(path=path, value=after)
-                )
-        return self._notify(*changes)
+        requests: list[ChangeRequest] = [
+            Assign(path=path, value=value) for path, value in fields_to_change.items()
+        ]
+        return self._validate_and_commit_changes(requests)
 
     async def set_and_wait(self, *args, **fields: Any) -> None:
-        """
-        `set`, and also run the async observers it returns.
-
-        The one async surface of this library: every other writer is sync and
-        hands the async observers back to the caller.
-        """
-        pending = self.set(*args, **fields)
-        if not pending:
-            return
-        failures: list[Exception] = []
-        for result in await asyncio.gather(*pending, return_exceptions=True):
-            if isinstance(result, Exception):
-                failures.append(result)
-            # Cancellation or similar: propagate, don't collect
-            elif isinstance(result, BaseException):
-                raise result
-        if failures:
-            raise ExceptionGroup("Config observers failed", failures)
-
-    def _set(self, name: str, value: Any) -> Any:
-        """Writes `self.name = value` and returns the previous value.
-
-        A name this section doesn't hold raises `PathNotFound`; whether the new
-        value differs is the caller's question.
-        """
-        try:
-            before = self[name]
-        except KeyError as error:
-            # If `name` doesn't already exist on a static section, it's not settable
-            raise PathNotFound(type(self), name) from error
-        else:
-            super().__setattr__(name, value)
-            self._mark_ancestors_as_set()
-            return before
-
-        # # Only apply changes for new names, or new values for existing names
-        # if name in self and getattr(self, name) == value:
-        #     return False
-        # super().__setattr__(name, value)
-        # self._mark_ancestors_as_set()
-        # return True
+        """`set`, and also run the async observers it returns."""
+        await _run_async_observers(self.set(*args, **fields))
 
     # TODO: review need and usage across project, replace with [] where it makes sense
     def get(self, path: str, *, as_json: bool = False) -> Any:
@@ -616,59 +540,28 @@ class ConfigSection(BaseModel):
 
         return register
 
-    def _delete(self, name: str) -> Any:
-        """A plain section declares everything it holds, so deletion always raises."""
-        if name in type(self).model_fields:
-            raise AttributeError(
-                f"{name!r} is a declared field of {type(self).__name__!r} and can't be deleted"
-            )
-        raise PathNotFound(type(self), name)
-
     def __delattr__(self, name: str) -> None:
+        """Plain deletion (`del config.plugins.ghost`).
+
+        Refuses before applying when the change would reach an async observer,
+        like plain assignment.
+        """
         if name in self.__private_attributes__:
             super().__delattr__(name)
-        else:
-            if name in self:
-                # Ask before deleting, so a refusal leaves the entry in place.
-                reached = [
-                    handler
-                    for _section, handler, _paths in self._observers_for(
-                        Deleted(path=name, value=self[name])
-                    )
-                    if inspect.iscoroutinefunction(handler)
-                ]
-                if reached:
-                    raise AsyncObserversNotCalled(
-                        name, [getattr(h, "__name__", repr(h)) for h in reached]
-                    )
-            value = self._delete(name)
-            async_callbacks = self._notify(Deleted(path=name, value=value))
-            if async_callbacks:
-                # Only an observer registering another one mid-notification
-                #  can get here; the deletion already happened.
-                for awaitable in async_callbacks:
-                    if inspect.iscoroutine(awaitable):
-                        awaitable.close()
-                raise AsyncObserversNotCalled(
-                    name,
-                    [getattr(a, "__name__", repr(a)) for a in async_callbacks],
-                    applied=True,
-                )
+            return
+        self._validate_and_commit_refusing_async_observers(Delete(path=name))
 
-    def unset(self, *paths: str) -> list[Awaitable]:
-        changes = []
-        for path in paths:
-            section, leaf_name, _ = self.leaf_parent_name_and_schema(path)
-            value = section._delete(leaf_name)
-            changes.append(Deleted(path=path, value=value))
-        return self._notify(*changes)
+    def delete(self, *paths: str) -> list[Awaitable]:
+        """
+        Delete dynamic entries by dotted path and call the sync observers;
+        returns the async observers' coroutines for the caller to await.
+        """
+        requests: list[ChangeRequest] = [Delete(path=path) for path in paths]
+        return self._validate_and_commit_changes(requests)
 
-
-
-
-    ###########################################################################
-    # BEGIN Atomic writing
-    ###########################################################################
+    async def delete_and_wait(self, *paths: str) -> None:
+        """`delete`, and also run the async observers it returns."""
+        await _run_async_observers(self.delete(*paths))
 
     def _group_changes_by_parent(self, requests: list[ChangeRequest]) -> dict[str, _ChangeGroup]:
         """Group changes by parent section path."""
@@ -904,7 +797,52 @@ class ConfigSection(BaseModel):
          validation passes, which would run validators again, but would follow the
          normal assignment flow.
         """
+        return self._commit_validated_changes(self._validate_changes(requests))
 
+    def _validate_and_commit_refusing_async_observers(self, request: ChangeRequest) -> None:
+        """
+        The write behind plain assignment and `del`, and their `[]` forms, which
+        can neither run nor return an async observer.
+
+        Refuses before committing when the change would reach one. The check
+         reads the notifications after validation fixed them, so a write that
+         changes nothing never refuses.
+        """
+        validated_change_groups = self._validate_changes([request])
+        notifications = [
+            notification
+            for _change_group, candidate_data, _candidate in validated_change_groups
+            for notification in candidate_data.events_by_leaf.values()
+        ]
+        reached_async_observers = [
+            handler
+            for _section, handler, _paths in self._observers_for(*notifications)
+            if inspect.iscoroutinefunction(handler)
+        ]
+        if reached_async_observers:
+            raise AsyncObserversNotCalled(
+                request.path,
+                [getattr(h, "__name__", repr(h)) for h in reached_async_observers],
+            )
+        pending_async_observers = self._commit_validated_changes(validated_change_groups)
+        if pending_async_observers:
+            # Only an observer that registered an async one mid-notification can
+            #  get here, so the change is already applied.
+            for awaitable in pending_async_observers:
+                if inspect.iscoroutine(awaitable):
+                    awaitable.close()
+            raise AsyncObserversNotCalled(
+                request.path,
+                [getattr(a, "__name__", repr(a)) for a in pending_async_observers],
+                applied=True,
+            )
+
+    def _validate_changes(self, requests: list[ChangeRequest]) -> list[_ValidatedChangeGroup]:
+        """
+        Validates the batch on one candidate per parent section, and fixes each
+         group's notifications. Raises on the first refusal, and nothing live
+         is touched.
+        """
         # HACK: local import to avoid import cycle.
         # validation.py import static.py so validation candidates can inherit ConfigSection,
         #  and static.py imports validation.py here to build a candidate from change request data.
@@ -914,7 +852,7 @@ class ConfigSection(BaseModel):
         # Group changes by parent path
         changes_by_parent = self._group_changes_by_parent(requests)
 
-        validated_change_group_data_and_candidates: list[tuple[_ChangeGroup, _CandidateData, ConfigSection]] = []
+        validated_change_group_data_and_candidates: list[_ValidatedChangeGroup] = []
 
         for change_group in changes_by_parent.values():
             parent_section = change_group.parent_section
@@ -945,8 +883,16 @@ class ConfigSection(BaseModel):
             validated_change_group_data_and_candidates.append(
                 (change_group, candidate_data, validation_candidate)
             )
+        return validated_change_group_data_and_candidates
 
-        # Batch succeeded, commit changes and send notifications
+    def _commit_validated_changes(
+            self,
+            validated_change_group_data_and_candidates: list[_ValidatedChangeGroup],
+    ) -> list[Awaitable]:
+        """
+        Copies every validated candidate into its live section, then notifies
+         once for the whole batch. Nothing here can refuse.
+        """
         all_notifications: list[ConfigChange] = []
         for change_group, candidate_data, validation_candidate in validated_change_group_data_and_candidates:
             change_group.parent_section._commit_candidate(
@@ -958,13 +904,22 @@ class ConfigSection(BaseModel):
         return self._notify(*all_notifications)
 
 
-    ###########################################################################
-    # END Atomic writing
-    ###########################################################################
-
-
-
-
+async def _run_async_observers(pending: list[Awaitable]) -> None:
+    """
+    Awaits the async observers a sync writer returned. Every `_and_wait`
+     method is its writer followed by this.
+    """
+    if not pending:
+        return
+    failures: list[Exception] = []
+    for result in await asyncio.gather(*pending, return_exceptions=True):
+        if isinstance(result, Exception):
+            failures.append(result)
+        # Cancellation or similar: propagate, don't collect
+        elif isinstance(result, BaseException):
+            raise result
+    if failures:
+        raise ExceptionGroup("Config observers failed", failures)
 
 
 def _is_section(cls: Any) -> TypeIs[type[ConfigSection]]:

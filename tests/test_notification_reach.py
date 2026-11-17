@@ -102,7 +102,7 @@ def test_each_change_type_carries_what_it_means(settings):
     heard = watch(settings)
     settings.plugins["ghost"] = {"enabled": True}
     settings.plugins["ghost"] = {"enabled": False}
-    settings.plugins.unset("ghost")
+    settings.plugins.delete("ghost")
 
     created, updated, deleted = heard
     assert isinstance(created, Created) and created.value.enabled is True

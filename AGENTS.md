@@ -30,7 +30,7 @@ notifig/
   exceptions.py        PathNotFound, NotASection, EntryRequiresData, AsyncObserversNotCalled, FlagIsReserved
   sources.py           File loading/merging (anyconfig), atomic save_config, ConfigFileSource
   utils.py             typing/pydantic helpers (declared_type, unwrap_optional, nested_include, ...)
-  section/static.py    ConfigSection: paths, walk, set/unset, observers, notification routing
+  section/static.py    ConfigSection: paths, walk, set/delete, observers, notification routing
   section/dynamic.py   DynamicSection[T]: runtime entries in model_extra, set_type/remove_type, _unresolved
   annotations/         Choice, CLIFlags, Delimited, Link, Path/AbsolutePath/PathPattern
 tests/
@@ -52,16 +52,18 @@ tests/
   contain dots, and `InvalidEntryName` is the only place that message is built.
   `walk`/`walk_schema` accept `*` (one level) and `**` (everything below, last segment only).
   Path resolution lives in `leaf_parent_name_and_schema`, so reuse it instead of writing another.
-- **Writes and notifications.** Every writer goes through `_set` / `_delete` and then
-  `_notify`. `_observers_for` is pure: it computes who would hear a change, both up the
+- **Writes and notifications.** Every writer builds change requests (`write/request.py`)
+  and goes through `_validate_and_commit_changes`: the whole batch is validated on
+  candidates, committed only if every candidate passes, then `_notify` runs once. `_observers_for` is pure: it computes who would hear a change, both up the
   ancestor chain and down to the change's owner, rewriting each change's path relative to
   every observing section. Observers are isolated: a sync failure is collected into
   `ExceptionGroup("Config observers failed", ...)` and does not stop the others.
 - **The write contract** (`tests/test_write_contract.py`):
-  - `set()`, `unset()`, `set_type()` and `remove_type()` are sync. They apply the change,
+  - `set()`, `delete()`, `set_type()` and `remove_type()` are sync. They apply the change,
     run the sync observers, and **return** the async observers' coroutines.
-  - `set_and_wait()` / `set_type_and_wait()` are the only async surface.
-  - Plain assignment, `[]=` and `del` raise `AsyncObserversNotCalled` **before applying**
+  - Their `_and_wait()` counterparts (`set_and_wait()`, `delete_and_wait()`,
+    `set_type_and_wait()`, `remove_type_and_wait()`) are the only async surface.
+  - Plain assignment, `[]=`, `del` and `del []` raise `AsyncObserversNotCalled` **before applying**
     when an async observer would be reached.
   - A write that changes nothing notifies nobody, so it never raises.
 - **Dynamic sections.** `DynamicSection[T]` keeps its entries in `__pydantic_extra__`.
