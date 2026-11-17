@@ -232,7 +232,7 @@ class ConfigSection(BaseModel):
                 raise PathNotFound(cls, name)
             field_info = cls.model_fields[name]
             section = field_info.annotation
-            if rest and not _is_section(section):
+            if rest and not _is_section_class(section):
                 # `*.url` skips the fields that can't contain `url`
                 if segment == "*":
                     continue
@@ -240,7 +240,7 @@ class ConfigSection(BaseModel):
             yield name, field_info
             # `**` keeps going to the bottom
             next_path = "**" if segment == "**" else rest
-            if next_path and _is_section(section):
+            if next_path and _is_section_class(section):
                 for sub_path, sub_info in section.walk_schema(next_path):
                     yield f"{name}.{sub_path}", sub_info
 
@@ -762,7 +762,14 @@ class ConfigSection(BaseModel):
         # Not just the ones from the changes, since a before model_validator
         #  could have written to a separate field
         for field_name in type(self).model_fields:
-            if (candidate_value := candidate[field_name]) != self[field_name]:
+            # NOTE: this comparison needs our custom __eq__ to avoid comparing
+            #  fields that are should not be set on the candidate like `_parent`
+            live_value = self[field_name]
+            if (candidate_value := candidate[field_name]) != live_value:
+                # If a changed sub-entry is a sub-section, copy their observers
+                #  recursing into further sub-sub-sections.
+                if _is_section(live_value) and _is_section(candidate_value):
+                    candidate_value._take_observers_from(live_value)
                 self.__dict__[field_name] = candidate_value
         # Set which fields changed on this section
         # Notification changes only contain the actual changed paths,
@@ -903,6 +910,24 @@ class ConfigSection(BaseModel):
 
         return self._notify(*all_notifications)
 
+    def _take_observers_from(self, other: ConfigSection):
+        """
+        Copies the observers from another section, recursing into sub-sections.
+        Useful when a section gets replaced.
+        """
+        self._observers.extend(other._observers)
+        # NOTE: should we do this? Seems too opinionated.
+        other._observers.clear()
+        for name, value in self:
+            try:
+                other_value = other[name]
+            except KeyError:
+                continue
+            # if this value is a sub-section in both this section and
+            # the other one, recurse inside it and copy its observers
+            if _is_section(value) and _is_section(other_value):
+                value._take_observers_from(other_value)
+
 
 async def _run_async_observers(pending: list[Awaitable]) -> None:
     """
@@ -922,8 +947,11 @@ async def _run_async_observers(pending: list[Awaitable]) -> None:
         raise ExceptionGroup("Config observers failed", failures)
 
 
-def _is_section(cls: Any) -> TypeIs[type[ConfigSection]]:
+def _is_section_class(cls: Any) -> TypeIs[type[ConfigSection]]:
     return isinstance(cls, type) and issubclass(cls, ConfigSection)
+
+def _is_section(cls: Any) -> TypeIs[ConfigSection]:
+    return isinstance(cls, ConfigSection)
 
 
 # A config observer: (section, the changes it hears about), sync or async.

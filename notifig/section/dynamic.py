@@ -19,7 +19,7 @@ from ..exceptions import PathNotFound, CantDeleteRetypeDeclaredField, InvalidEnt
 from ..utils import is_pydantic_model
 from ..write.notification import Created, Deleted, Updated
 from ..write.request import ChangeRequest, RemoveType, SetType
-from .static import _MUTABLE, ConfigSection, _CandidateData, _run_async_observers
+from .static import _MUTABLE, ConfigSection, _CandidateData, _run_async_observers, _is_section
 
 # Like _MUTABLE, but the section accepts keys it does not declare. A dynamic
 #  section keeps its entries there, so they can't be rejected as unknown.
@@ -425,8 +425,18 @@ class DynamicSection[T](ConfigSection):
                 del live_dynamic_entries[name]
         # Add new or updated dynamic entries
         for name, value in candidate_dynamic_entries.items():
-            if name not in live_dynamic_entries or live_dynamic_entries[name] != value:
+            try:
+                live_value = live_dynamic_entries[name]
+            except KeyError:
+                # Missing value, add it
                 live_dynamic_entries[name] = value
+            else:
+                if live_value != value:
+                    # Different value, copy observers if it's a section,
+                    #  then also add it
+                    if _is_section(live_value) and _is_section(value):
+                        value._take_observers_from(live_value)
+                    live_dynamic_entries[name] = value
         # Copy unresolved entries. The candidate's unresolved is always empty
         #  since we never write to it, use candidate_data.unresolved
         self._unresolved = candidate_data.unresolved
