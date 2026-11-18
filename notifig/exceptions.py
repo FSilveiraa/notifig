@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from typing import Iterator
 
 from pydantic import BaseModel, ValidationError
 
@@ -18,7 +17,6 @@ class NotASection(AttributeError):
         if path:
             msg = f"{path!r}: {msg}"
         super().__init__(msg)
-
 
 
 class InvalidEntryName(ValueError):
@@ -107,8 +105,7 @@ class CantDeleteRetypeDeclaredField(AttributeError):
 class OverlappingChangePaths(ValueError):
     def __init__(self, paths: Sequence[tuple[str, str]]):
         pairs = "\n".join(
-            f"  {path!r} and {other_path!r}"
-            for path, other_path in paths
+            f"  {path!r} and {other_path!r}" for path, other_path in paths
         )
         super().__init__(
             f"Cannot apply changes to the following overlapping paths:\n{pairs}"
@@ -132,10 +129,13 @@ def entry_requires_data_when_fields_are_missing(
     except ValidationError as error:
         line_errors = error.errors()
         # At least one item was not about missing data for a required field
-        if not line_errors or any(line_error["type"] != "missing" for line_error in line_errors):
+        if not line_errors or any(
+            line_error["type"] != "missing" for line_error in line_errors
+        ):
             raise
         # All items are about missing data for required fields, raise appropriately
         missing_fields = [
-            ".".join(str(part) for part in line_error["loc"]) for line_error in line_errors
+            ".".join(str(part) for part in line_error["loc"])
+            for line_error in line_errors
         ]
         raise EntryRequiresData(entry_type, entry_name, missing_fields) from error

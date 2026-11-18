@@ -3,19 +3,30 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import replace, dataclass, field
-from typing import TYPE_CHECKING, Any, TypeIs, NoReturn, assert_never
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, NoReturn, TypeIs, assert_never
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_core import InitErrorDetails
 
 from ..annotation.cli_flags import CLIFlags
-from ..exceptions import AsyncObserversNotCalled, NotASection, PathNotFound, CantDeleteRetypeDeclaredField, \
-    OverlappingChangePaths
-from ..utils import split_parent_path_and_leaf, matches_prefix
+from ..exceptions import (
+    AsyncObserversNotCalled,
+    CantDeleteRetypeDeclaredField,
+    NotASection,
+    OverlappingChangePaths,
+    PathNotFound,
+)
+from ..utils import matches_prefix, split_parent_path_and_leaf
 from ..write.notification import ConfigChange, Created, Deleted, Updated
-from ..write.request import ChangeRequest, Assign, Delete, SetType, RemoveType
+from ..write.request import Assign, ChangeRequest, Delete, RemoveType, SetType
 
 # Model configs used by pydantic to inform model validation.
 # Forces model re-validation on re-assignment and allows arbitrary types.
@@ -195,8 +206,6 @@ class ConfigSection(BaseModel):
          2 sections are equal when their actual data matches.
 
         NOTE: same problem exists with observers, also fixed by not comparing privates.
-        TODO: move observers to top-level root, this only fixes updates, but maintains
-         the more serious problem of observers not being copied to a replaced section.
 
         NOTE: comparing `__dict__` relies on sections never using
          `functools.cached_property`, which stores its value there. pydantic's
@@ -406,7 +415,9 @@ class ConfigSection(BaseModel):
         # and the dict of path->ConfigChange for that section.
         to_notify: dict[int, tuple[ConfigSection, dict[str, ConfigChange]]] = {}
 
-        def _add_changes_along_path(start_section: ConfigSection, change: ConfigChange) -> None:
+        def _add_changes_along_path(
+            start_section: ConfigSection, change: ConfigChange
+        ) -> None:
             """Adds a change for each section across change.path"""
             parent_path, _leaf_name = split_parent_path_and_leaf(change.path)
             _section, own_changes = to_notify.setdefault(
@@ -425,8 +436,7 @@ class ConfigSection(BaseModel):
                     #  this section down to the leaf
                     path_to_notify = change.path.removeprefix(f"{sub_path}.")
                     subsection_changes[path_to_notify] = replace(
-                        change,
-                        path=path_to_notify
+                        change, path=path_to_notify
                     )
 
         for change in changes:
@@ -592,13 +602,17 @@ class ConfigSection(BaseModel):
         """`delete`, and also run the async observers it returns."""
         await _run_async_observers(self.delete(*paths))
 
-    def _group_changes_by_parent(self, requests: list[ChangeRequest]) -> dict[str, _ChangeGroup]:
+    def _group_changes_by_parent(
+        self, requests: list[ChangeRequest]
+    ) -> dict[str, _ChangeGroup]:
         """Group changes by parent section path."""
         changes_by_parent: dict[str, _ChangeGroup] = {}
         for change_request in requests:
             parent_path, leaf_name = split_parent_path_and_leaf(change_request.path)
             # Find the parent section,
-            parent_section, _leaf_name, field_info = self.leaf_parent_name_and_schema(change_request.path)
+            parent_section, _leaf_name, field_info = self.leaf_parent_name_and_schema(
+                change_request.path
+            )
             assert leaf_name == _leaf_name
             try:
                 change_group_for_parent = changes_by_parent[parent_path]
@@ -608,12 +622,15 @@ class ConfigSection(BaseModel):
                     parent_path=parent_path,
                     parent_section=parent_section,
                 )
-            change_group_for_parent.change_requests_by_leaf_name[leaf_name] = change_request
+            change_group_for_parent.change_requests_by_leaf_name[leaf_name] = (
+                change_request
+            )
         return changes_by_parent
 
-
     @classmethod
-    def _refuse_writing_to_frozen_fields(cls, change_requests: dict[str, ChangeRequest]) -> None:
+    def _refuse_writing_to_frozen_fields(
+        cls, change_requests: dict[str, ChangeRequest]
+    ) -> None:
         """
         Raises an error if any change attempts to modify a frozen field, or if
         the section itself is frozen (`model_config["frozen"]`).
@@ -632,9 +649,8 @@ class ConfigSection(BaseModel):
                 # A leaf name that's not on `model_fields` can still exist
                 #  in model_extra for DynamicSection and can't be frozen
                 if (
-                    (field_info := cls.model_fields.get(leaf_name))
-                    and field_info.frozen
-                ):
+                    field_info := cls.model_fields.get(leaf_name)
+                ) and field_info.frozen:
                     refused_names.append(leaf_name)
 
         # Raise a joint error for frozen fields
@@ -642,18 +658,24 @@ class ConfigSection(BaseModel):
             line_errors: list[InitErrorDetails] = []
             for leaf_name in refused_names:
                 change_request = change_requests[leaf_name]
-                line_errors.append({
-                    "type": error_type,
-                    "loc": (leaf_name,),
-                    "input": change_request.value if isinstance(change_request, Assign) else None,
-                })
+                line_errors.append(
+                    {
+                        "type": error_type,
+                        "loc": (leaf_name,),
+                        "input": change_request.value
+                        if isinstance(change_request, Assign)
+                        else None,
+                    }
+                )
             raise ValidationError.from_exception_data(
                 title=cls.__name__,
                 line_errors=line_errors,
             )
 
     @staticmethod
-    def _refuse_changes_for_overlapping_paths(change_requests: list[ChangeRequest]) -> None:
+    def _refuse_changes_for_overlapping_paths(
+        change_requests: list[ChangeRequest],
+    ) -> None:
         """
         Raise if any changes are for overlapping or identical paths.
         Ex: delete `api`, assign a value to `api.host.url`.
@@ -663,14 +685,10 @@ class ConfigSection(BaseModel):
             (path, other_path)
             for index, path in enumerate(paths)
             for other_path in paths[index + 1 :]
-            if (
-                matches_prefix(path, other_path)
-                or matches_prefix(other_path, path)
-            )
+            if (matches_prefix(path, other_path) or matches_prefix(other_path, path))
         ]
         if overlapping:
             raise OverlappingChangePaths(overlapping)
-
 
     def _start_candidate_data(self) -> _CandidateData:
         return _CandidateData(data=dict(self))
@@ -682,27 +700,32 @@ class ConfigSection(BaseModel):
         raise PathNotFound(cls, leaf_name)
 
     def _apply_assign(
-            self,
-            candidate_data: _CandidateData,
-            leaf_name: str,
-            value: Any
+        self, candidate_data: _CandidateData, leaf_name: str, value: Any
     ) -> Created | Updated | None:
         before = candidate_data.data[leaf_name]
         candidate_data.data[leaf_name] = value
-        return None if before == value else Updated(path=leaf_name, before=before, after=value)
+        return (
+            None
+            if before == value
+            else Updated(path=leaf_name, before=before, after=value)
+        )
 
     def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted:
         self._raise_deleting_or_retyping_declared_field(leaf_name)
 
-    def _apply_set_type(self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any) -> Created | Updated | None:
+    def _apply_set_type(
+        self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any
+    ) -> Created | Updated | None:
         self._raise_deleting_or_retyping_declared_field(leaf_name)
 
-    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted:
+    def _apply_remove_type(
+        self, candidate_data: _CandidateData, leaf_name: str
+    ) -> Deleted:
         self._raise_deleting_or_retyping_declared_field(leaf_name)
 
     def _candidate_data_from_change_requests(
-            self,
-            change_requests: dict[str, ChangeRequest],
+        self,
+        change_requests: dict[str, ChangeRequest],
     ) -> _CandidateData:
         candidate_data = self._start_candidate_data()
         for leaf_name, change_request in change_requests.items():
@@ -722,12 +745,11 @@ class ConfigSection(BaseModel):
                 candidate_data.events_by_leaf[leaf_name] = event
         return candidate_data
 
-
     @staticmethod
     def _fix_notification_values(
-            events_by_leaf_name: dict[str, ConfigChange],
-            candidate: ConfigSection,
-            parent_path: str,
+        events_by_leaf_name: dict[str, ConfigChange],
+        candidate: ConfigSection,
+        parent_path: str,
     ) -> None:
         """
         Takes the notifications for each leaf of a parent, corrects
@@ -757,21 +779,24 @@ class ConfigSection(BaseModel):
                 continue
             match event:
                 case Created():
-                    events_by_leaf_name[leaf_name] = replace(event, path=path, value=value)
+                    events_by_leaf_name[leaf_name] = replace(
+                        event, path=path, value=value
+                    )
                 case Updated(before=before):
                     if value == before:
                         # No real change happened, don't send a notification
                         del events_by_leaf_name[leaf_name]
                     else:
-                        events_by_leaf_name[leaf_name] = replace(event, path=path, after=value)
+                        events_by_leaf_name[leaf_name] = replace(
+                            event, path=path, after=value
+                        )
                 case Deleted():
                     events_by_leaf_name[leaf_name] = replace(event, path=path)
 
-
     def _commit_candidate(
-            self,
-            candidate: ConfigSection,
-            candidate_data: _CandidateData,
+        self,
+        candidate: ConfigSection,
+        candidate_data: _CandidateData,
     ) -> None:
         """
         Copies every declared field from the validation candidate into
@@ -805,7 +830,10 @@ class ConfigSection(BaseModel):
         #  after ignoring some, so use them to figure out which fields
         #  actually changed
         for leaf_name, event in candidate_data.events_by_leaf.items():
-            if isinstance(event, Deleted) or leaf_name in candidate_data.built_from_defaults:
+            if (
+                isinstance(event, Deleted)
+                or leaf_name in candidate_data.built_from_defaults
+            ):
                 self.__pydantic_fields_set__.discard(leaf_name)
             else:
                 self.__pydantic_fields_set__.add(leaf_name)
@@ -815,8 +843,9 @@ class ConfigSection(BaseModel):
         # HACK: mypy refuses treating a model_validator method as a callable without this
         self._stamp_parent_on_subsections()  # type: ignore[operator]
 
-
-    def _validate_and_commit_changes(self, requests: list[ChangeRequest]) -> list[Awaitable]:
+    def _validate_and_commit_changes(
+        self, requests: list[ChangeRequest]
+    ) -> list[Awaitable]:
         """
         Single entrypoint for all updates/deletions to section tree.
         Changes are validated as an atomic batch using validation candidates.
@@ -835,7 +864,9 @@ class ConfigSection(BaseModel):
         """
         return self._commit_validated_changes(self._validate_changes(requests))
 
-    def _validate_and_commit_refusing_async_observers(self, request: ChangeRequest) -> None:
+    def _validate_and_commit_refusing_async_observers(
+        self, request: ChangeRequest
+    ) -> None:
         """
         The write behind plain assignment and `del`, and their `[]` forms, which
         can neither run nor return an async observer.
@@ -860,7 +891,9 @@ class ConfigSection(BaseModel):
                 request.path,
                 [getattr(h, "__name__", repr(h)) for h in reached_async_observers],
             )
-        pending_async_observers = self._commit_validated_changes(validated_change_groups)
+        pending_async_observers = self._commit_validated_changes(
+            validated_change_groups
+        )
         if pending_async_observers:
             # Only an observer that registered an async one mid-notification can
             #  get here, so the change is already applied.
@@ -873,7 +906,9 @@ class ConfigSection(BaseModel):
                 applied=True,
             )
 
-    def _validate_changes(self, requests: list[ChangeRequest]) -> list[_ValidatedChangeGroup]:
+    def _validate_changes(
+        self, requests: list[ChangeRequest]
+    ) -> list[_ValidatedChangeGroup]:
         """
         Validates the batch on one candidate per parent section, and fixes each
          group's notifications. Raises on the first refusal, and nothing live
@@ -896,10 +931,13 @@ class ConfigSection(BaseModel):
             # Ensure no change happens on a frozen field/section
             parent_section._refuse_writing_to_frozen_fields(section_changes)
             # Build data for validation candidate by applying changes to parent data
-            candidate_data = parent_section._candidate_data_from_change_requests(section_changes)
+            candidate_data = parent_section._candidate_data_from_change_requests(
+                section_changes
+            )
             # Find all declared fields with changes
             changed_declared_fields = frozenset(
-                name for name in section_changes.keys()
+                name
+                for name in section_changes.keys()
                 if name in type(parent_section).model_fields
             )
             # Get the validation candidate class that skips validators for unchanged fields
@@ -922,15 +960,19 @@ class ConfigSection(BaseModel):
         return validated_change_group_data_and_candidates
 
     def _commit_validated_changes(
-            self,
-            validated_change_group_data_and_candidates: list[_ValidatedChangeGroup],
+        self,
+        validated_change_group_data_and_candidates: list[_ValidatedChangeGroup],
     ) -> list[Awaitable]:
         """
         Copies every validated candidate into its live section, then notifies
          once for the whole batch. Nothing here can refuse.
         """
         all_notifications: list[ConfigChange] = []
-        for change_group, candidate_data, validation_candidate in validated_change_group_data_and_candidates:
+        for (
+            change_group,
+            candidate_data,
+            validation_candidate,
+        ) in validated_change_group_data_and_candidates:
             change_group.parent_section._commit_candidate(
                 candidate=validation_candidate,
                 candidate_data=candidate_data,
@@ -981,9 +1023,7 @@ class ConfigSection(BaseModel):
                         for change in value._find_changes_compared_to(other_value)
                     )
                 elif value != other_value:
-                    changes.append(
-                        Updated(path=name, before=other_value, after=value)
-                    )
+                    changes.append(Updated(path=name, before=other_value, after=value))
         # 2. Find deletions
         for name, value in other:
             if name not in self:
@@ -1011,6 +1051,7 @@ async def _run_async_observers(pending: list[Awaitable]) -> None:
 
 def _is_section_class(cls: Any) -> TypeIs[type[ConfigSection]]:
     return isinstance(cls, type) and issubclass(cls, ConfigSection)
+
 
 def _is_section(cls: Any) -> TypeIs[ConfigSection]:
     return isinstance(cls, ConfigSection)

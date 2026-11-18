@@ -26,11 +26,11 @@ from .annotation import (
 from .config import Config
 from .exceptions import (
     AsyncObserversNotCalled,
-    InvalidEntryName,
+    CantDeleteRetypeDeclaredField,
     EntryRequiresData,
+    InvalidEntryName,
     NotASection,
     PathNotFound,
-    CantDeleteRetypeDeclaredField,
 )
 from .meta import ConfigDict
 from .section.dynamic import DynamicSection

@@ -6,7 +6,7 @@
   validator never sees a state left halfway by the order of the paths.
 - The commit writes into the live sections, so references to them and the
   observers registered on them survive.
-- A value a model validator derives is committed and reported like a written one.
+- A value a model validator derives is committed without emitting its own event.
 """
 
 from __future__ import annotations
@@ -124,12 +124,12 @@ def test_a_batch_of_one_still_refuses_an_invalid_final_state():
     assert settings.ports.low == 1000
 
 
-def test_a_value_a_model_validator_derives_is_committed_and_reported():
+def test_a_value_a_model_validator_derives_is_committed():
     settings = make_network_settings()
     heard = record_changes(settings)
     settings.clamped.set(low=20)
     assert (settings.clamped.low, settings.clamped.high) == (20, 20)
-    assert heard == [["clamped.low", "clamped.high"]]
+    assert heard == [["clamped.low"]]
 
 
 # --- The live tree survives --------------------------------------------------

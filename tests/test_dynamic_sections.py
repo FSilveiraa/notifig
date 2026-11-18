@@ -129,15 +129,15 @@ def test_set_type_for_an_unknown_name_builds_it_from_defaults():
 
 def test_an_entry_name_cannot_carry_a_dot():
     """`section["a.b"]` navigates to `b` inside `a`, so an entry named `a.b`
-    could never be read back. Both doors refuse: `set_type` and the config
-    load."""
+    could never be read back: `set_type("a.b", ...)` walks `a` as a path and
+    raises `PathNotFound`, and config load refuses `a.b` at the door."""
     settings = make_settings()
-    with pytest.raises(ValueError, match="cannot be an entry name"):
+    with pytest.raises(PathNotFound):
         settings.plugins.set_type("a.b", TypedEntry)
     assert "a.b" not in dict(settings.plugins)
     assert "a" not in dict(settings.plugins)  # nothing half-created
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="cannot be an entry name"):
         type(settings)(
             api={"url": "https://example.test/v1"},
             plugins={"a.b": {"enabled": True}},
@@ -192,24 +192,21 @@ def test_remove_type_for_an_unknown_name_raises():
         settings.plugins.remove_type("ghost")
 
 
-def test_a_batch_is_one_notification_and_fails_partially():
+def test_a_failing_set_type_batch_applies_nothing_and_notifies_nobody():
     settings = make_settings(plugins_section=PreservingPlugins)
     settings.plugins["good"] = {"enabled": True}
     settings.plugins["needy"] = {"enabled": True}
+    good_before = settings.plugins["good"]
     heard: list = []
 
     @settings.plugins.on_change()
     def hear(_section, changes):
         heard.append([change.path for change in changes])
 
-    # NOTE: pinned behaviour — the notification rides the success path, so a
-    #  failed batch notifies NOBODY even though the earlier entries applied.
-    #  Whether a failed batch should notify what it did apply is an open design
-    #  question, not settled here.
     with pytest.raises(EntryRequiresData):
         settings.plugins.set_type(good=TypedEntry, needy=NeedsData)
     assert heard == []
-    assert type(settings.plugins["good"]) is TypedEntry
+    assert settings.plugins["good"] is good_before
 
 
 def test_a_typed_entrys_own_observers_hear_its_writes(settings):

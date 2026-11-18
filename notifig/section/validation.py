@@ -11,8 +11,8 @@ from pydantic import (
 )
 from pydantic.fields import FieldInfo
 
-from .static import ConfigSection
 from .dynamic import DynamicSection
+from .static import ConfigSection
 
 
 class ValidationSection(ConfigSection):
@@ -47,6 +47,7 @@ class DynamicValidationSection(ValidationSection, DynamicSection):
     TODO: overall review this behavior, consider moving type coercion out
      of a model validator.
     """
+
     @override
     @model_validator(mode="wrap")
     @classmethod

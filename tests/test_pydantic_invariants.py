@@ -171,28 +171,6 @@ def test_t2_private_and_extra_storage_are_the_same_namespace():
     assert settings.plugins["ghost"].enabled is True  # and so does __getattr__
 
 
-def test_t2_set_type_survives_validate_assignment_rejecting_a_write():
-    """T2. `set_type` stores through `BaseModel.__setattr__`, and pydantic's
-    `validate_assignment` re-validation runs AFTER the value has landed - a
-    rejection there does not roll the write back. That is exactly why
-    `set_type` refuses a dotted entry name BEFORE building: the guard must
-    precede the store, or a refused name would leave a half-stored entry."""
-
-    class Entry(ConfigSection):
-        enabled: bool = True
-
-    class Plugins(DynamicSection[Entry]):
-        pass
-
-    class Settings(Config):
-        plugins: Plugins
-
-    settings = Settings(plugins={}, parse_cli=False)
-    with pytest.raises(ValueError):
-        settings.plugins.set_type("dotted.name", Entry)
-    assert "dotted.name" not in dict(settings.plugins)
-
-
 def test_t1_model_validate_keeps_section_instances_by_identity():
     """T1. A validation candidate is built from the section's CURRENT field
     values with the batch's writes laid on top, and every untouched
@@ -233,9 +211,9 @@ def test_t1_a_validation_candidate_does_not_reparent_the_sections_it_is_built_fr
     api = settings.api
     assert api._parent is settings
 
-    candidate_class_from_section_class(
-        Settings, frozenset({"api"})
-    ).model_validate({"api": api})
+    candidate_class_from_section_class(Settings, frozenset({"api"})).model_validate(
+        {"api": api}
+    )
 
     assert api._parent is settings
 

@@ -14,12 +14,22 @@ from pydantic import (
 )
 from pydantic.fields import FieldInfo
 
-from ..exceptions import PathNotFound, CantDeleteRetypeDeclaredField, InvalidEntryName, \
-    entry_requires_data_when_fields_are_missing
+from ..exceptions import (
+    CantDeleteRetypeDeclaredField,
+    InvalidEntryName,
+    PathNotFound,
+    entry_requires_data_when_fields_are_missing,
+)
 from ..utils import is_pydantic_model
 from ..write.notification import Created, Deleted, Updated
 from ..write.request import ChangeRequest, RemoveType, SetType
-from .static import _MUTABLE, ConfigSection, _CandidateData, _run_async_observers, _is_section
+from .static import (
+    _MUTABLE,
+    ConfigSection,
+    _CandidateData,
+    _is_section,
+    _run_async_observers,
+)
 
 # Like _MUTABLE, but the section accepts keys it does not declare. A dynamic
 #  section keeps its entries there, so they can't be rejected as unknown.
@@ -278,17 +288,11 @@ class DynamicSection[T](ConfigSection):
 
     @override
     def _start_candidate_data(self) -> _CandidateData:
-        return _CandidateData(
-            data=dict(self),
-            unresolved=dict(self._unresolved)
-        )
+        return _CandidateData(data=dict(self), unresolved=dict(self._unresolved))
 
     @override
     def _apply_assign(
-            self,
-            candidate_data: _CandidateData,
-            leaf_name: str,
-            value: Any
+        self, candidate_data: _CandidateData, leaf_name: str, value: Any
     ) -> Created | Updated | None:
         """Sets the value of `leaf_name` to `value` in `candidate_data`."""
         try:
@@ -317,13 +321,16 @@ class DynamicSection[T](ConfigSection):
             # If it's a dynamic entry and the types don't match, build the
             #  new instance using the type of the existing one.
             # Because if it's a declared entry, pydantic's validators will handle it
-            if (
-                    leaf_name not in type(self).model_fields
-                    and not isinstance(value, type(before))
-               ):
+            if leaf_name not in type(self).model_fields and not isinstance(
+                value, type(before)
+            ):
                 value = TypeAdapter(type(before)).validate_python(value)
             candidate_data.data[leaf_name] = value
-        return None if before == value else Updated(path=leaf_name, before=before, after=value)
+        return (
+            None
+            if before == value
+            else Updated(path=leaf_name, before=before, after=value)
+        )
 
     @override
     def _apply_delete(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted:
@@ -343,9 +350,9 @@ class DynamicSection[T](ConfigSection):
 
     @override
     def _apply_set_type(
-            self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any
+        self, candidate_data: _CandidateData, leaf_name: str, entry_type: Any
     ) -> Created | Updated | None:
-        """Sets `entry_type` as the type for `leaf_name` in `candidate_data`. """
+        """Sets `entry_type` as the type for `leaf_name` in `candidate_data`."""
         # Refuse re-typing a declared field
         if leaf_name in type(self).model_fields:
             raise CantDeleteRetypeDeclaredField(type(self), leaf_name)
@@ -385,9 +392,10 @@ class DynamicSection[T](ConfigSection):
             return Created(path=leaf_name, value=new_entry)
         return Updated(path=leaf_name, before=current_entry, after=new_entry)
 
-
     @override
-    def _apply_remove_type(self, candidate_data: _CandidateData, leaf_name: str) -> Deleted:
+    def _apply_remove_type(
+        self, candidate_data: _CandidateData, leaf_name: str
+    ) -> Deleted:
         """Un-types `leaf_name` into `candidate_data.unresolved`."""
         # Refuse removing the type for a declared field
         if leaf_name in type(self).model_fields:
@@ -403,12 +411,11 @@ class DynamicSection[T](ConfigSection):
         )
         return Deleted(path=leaf_name, value=entry)
 
-
     @override
     def _commit_candidate(
-            self,
-            candidate: ConfigSection,
-            candidate_data: _CandidateData,
+        self,
+        candidate: ConfigSection,
+        candidate_data: _CandidateData,
     ) -> None:
         """
         Sets dynamic entries first, then passes the data to ConfigSection
