@@ -16,11 +16,14 @@ The rules pinned here are the ones the config-file scenarios depend on:
 
 from __future__ import annotations
 
-import pytest
-from pydantic import ValidationError
+import asyncio
+from typing import Any
 
-from notifig import ConfigDict, PathNotFound
-from notifig.exceptions import EntryRequiresData
+import pytest
+from pydantic import Field, ValidationError
+
+from notifig import Config, ConfigDict, PathNotFound
+from notifig.exceptions import CantDeleteRetypeDeclaredField, EntryRequiresData
 from notifig.section.dynamic import DynamicSection
 
 from .conftest import EntryConfig, PreservingPlugins, TypedEntry, make_settings
@@ -110,21 +113,14 @@ def test_set_type_keeps_an_entry_already_of_its_type():
 
 
 def test_set_type_with_no_data_builds_from_defaults_and_is_not_user_set():
+    """`set_type(name, Model)` needs no prior data: a section entry is a
+    BaseModel, so it can always be built from its own defaults, and a default is
+    not a value the user chose so `exclude_unset=True` omits it."""
     settings = make_settings()
     settings.plugins.set_type(fresh=TypedEntry)
+    assert type(settings.plugins["fresh"]) is TypedEntry
     assert settings.plugins["fresh"].enabled is True
-    # A default is not a value the user chose, so a save with
-    # `exclude_unset=True` won't write it out.
     assert "fresh" not in settings.plugins.__pydantic_fields_set__
-
-
-def test_set_type_for_an_unknown_name_builds_it_from_defaults():
-    """`set_type(name, Model)` needs no prior data: a section entry is a
-    BaseModel, so it can always be built from its own defaults."""
-    settings = make_settings()
-    settings.plugins.set_type(ghost=TypedEntry)
-    assert type(settings.plugins["ghost"]) is TypedEntry
-    assert settings.plugins["ghost"].enabled is True
 
 
 def test_an_entry_name_cannot_carry_a_dot():
@@ -220,3 +216,94 @@ def test_a_typed_entrys_own_observers_hear_its_writes(settings):
 
     settings.plugins["ghost"].enabled = False
     assert heard == ["enabled"]
+
+
+def test_an_untyped_dynamic_section_keeps_entries_in_unresolved_until_typed():
+    """When `T` is not a model (`DynamicSection[Any]`), blocks wait in
+    `unresolved` at load time and on assignment, round-trip on dump, and can be
+    updated, typed, or deleted directly from `unresolved`."""
+
+    class RawPlugins(DynamicSection[Any]):
+        declared: str = "fixed"
+
+    class RawSettings(Config):
+        plugins: RawPlugins = Field(default_factory=RawPlugins)
+
+    settings = RawSettings(
+        plugins={"declared": "custom", "alpha": {"enabled": False}},
+        parse_cli=False,
+    )
+    assert settings.plugins.declared == "custom"
+    assert settings.plugins.unresolved == ["alpha"]
+
+    # Runtime write to an untyped entry updates `unresolved` in place.
+    settings.plugins["alpha"] = {"enabled": True}
+    settings.plugins["beta"] = {"enabled": False}
+    assert settings.plugins.unresolved == ["alpha", "beta"]
+    assert settings.plugins.model_dump(mode="json") == {
+        "declared": "custom",
+        "alpha": {"enabled": True},
+        "beta": {"enabled": False},
+    }
+
+    # Deleting an unresolved entry removes its data.
+    settings.plugins.delete("beta")
+    assert settings.plugins.unresolved == ["alpha"]
+
+    # `set_type` adopts the unresolved data into a live typed entry.
+    settings.plugins.set_type(alpha=TypedEntry)
+    assert settings.plugins.unresolved == []
+    assert settings.plugins["alpha"].enabled is True
+
+
+def test_declared_fields_on_a_dynamic_section_refuse_delete_set_type_and_remove_type():
+    class MixedPlugins(DynamicSection[EntryConfig]):
+        declared: str = "fixed"
+
+    class MixedSettings(Config):
+        plugins: MixedPlugins = Field(default_factory=MixedPlugins)
+
+    settings = MixedSettings(parse_cli=False)
+    with pytest.raises(CantDeleteRetypeDeclaredField):
+        settings.plugins.delete("declared")
+    with pytest.raises(CantDeleteRetypeDeclaredField):
+        settings.plugins.set_type(declared=TypedEntry)
+    with pytest.raises(CantDeleteRetypeDeclaredField):
+        settings.plugins.remove_type("declared")
+
+
+def test_set_type_reraises_validation_error_when_data_is_wrong_rather_than_missing():
+    settings = make_settings()
+    settings.plugins["ghost"] = {"enabled": True}
+    with pytest.raises(ValidationError):
+        settings.plugins.set_type(ghost=int)
+
+
+def test_set_type_with_a_non_model_for_an_unknown_entry_raises_path_not_found():
+    settings = make_settings()
+    with pytest.raises(PathNotFound):
+        settings.plugins.set_type(unknown=int)
+
+
+def test_set_type_refuses_a_single_positional_argument():
+    settings = make_settings()
+    with pytest.raises(ValueError, match="exactly 2 or no positional"):
+        settings.plugins.set_type("ghost")
+
+
+def test_set_type_and_wait_and_remove_type_and_wait_run_async_observers():
+    settings = make_settings()
+    settings.plugins["ghost"] = {"enabled": False}
+    heard: list[str] = []
+
+    @settings.plugins.on_change()
+    async def hear(_section, changes):
+        heard.extend(type(change).__name__ for change in changes)
+
+    asyncio.run(settings.plugins.set_type_and_wait(ghost=TypedEntry))
+    assert type(settings.plugins["ghost"]) is TypedEntry
+    assert heard == ["Updated"]
+
+    asyncio.run(settings.plugins.remove_type_and_wait("ghost"))
+    assert "ghost" in settings.plugins.unresolved
+    assert heard == ["Updated", "Deleted"]

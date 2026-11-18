@@ -9,8 +9,9 @@ three doors must agree on the value they produce.
 from __future__ import annotations
 
 import pytest
+from pydantic import Field
 
-from notifig import PathNotFound
+from notifig import Config, ConfigSection, PathNotFound
 from notifig.exceptions import NotASection
 
 from .conftest import EntryConfig, make_settings
@@ -121,3 +122,47 @@ def test_a_standalone_section_builds_from_its_defaults():
     """A section is a valid model on its own; only a link needs a root."""
     standalone = make_settings().api.inner
     assert standalone.token == "t"
+
+
+def test_section_path_traces_from_root_down_to_nested_sections(settings):
+    assert settings._path == ""
+    assert settings.api._path == "api"
+    assert settings.api.inner._path == "api.inner"
+
+
+def test_walk_and_walk_schema_edges_and_excluded_subtrees(settings):
+    # `*.token` skips non-section siblings (`url`, `model`) and finds `inner.token`.
+    assert [p for p, _ in settings.api.walk("*.token")] == [
+        "inner",
+        "inner.token",
+    ]
+    assert [p for p, _ in type(settings.api).walk_schema("*.token")] == [
+        "inner",
+        "inner.token",
+    ]
+
+    with pytest.raises(ValueError, match="last segment"):
+        list(type(settings).walk_schema("**.api"))
+    with pytest.raises(NotASection):
+        list(type(settings).walk_schema("api.url.x"))
+    with pytest.raises(NotASection):
+        settings.leaf_parent_name_and_schema("api.url.x")
+
+    # DynamicSection.walk_schema yields Any for sub-paths below an undeclared entry.
+    assert [p for p, _ in type(settings).walk_schema("plugins.ghost.extra")] == [
+        "plugins",
+        "plugins.ghost",
+        "plugins.ghost.extra",
+    ]
+
+    # Excluded sections and all fields inside them are omitted from `editable_fields`.
+    class Hidden(ConfigSection):
+        secret: str = "s"
+
+    class AppWithHidden(Config):
+        visible: str = "v"
+        hidden: Hidden = Field(default_factory=Hidden, exclude=True)
+
+    editable = AppWithHidden(parse_cli=False).editable_fields()
+    assert "visible" in editable
+    assert "hidden.secret" not in editable

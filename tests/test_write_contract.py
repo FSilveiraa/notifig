@@ -12,7 +12,8 @@ import asyncio
 
 import pytest
 
-from notifig.exceptions import AsyncObserversNotCalled
+from notifig import PathNotFound
+from notifig.exceptions import AsyncObserversNotCalled, CantDeleteRetypeDeclaredField
 
 from .conftest import make_settings
 
@@ -177,12 +178,14 @@ def test_a_raising_async_observer_surfaces_from_set_and_wait():
 
 
 def test_a_declared_field_is_not_deletable(settings):
-    with pytest.raises(AttributeError, match="declared field"):
+    with pytest.raises(CantDeleteRetypeDeclaredField, match="declared field"):
         del settings.api.url
     assert settings.api.url == "https://example.test/v1"
+    with pytest.raises(PathNotFound):
+        settings.api.delete("nope")
 
 
-def test_unset_removes_an_entry_with_a_deleted_notification(settings):
+def test_delete_removes_an_entry_with_a_deleted_notification(settings):
     settings.plugins["ghost"] = {"enabled": True}
     heard: list = []
 
@@ -195,7 +198,26 @@ def test_unset_removes_an_entry_with_a_deleted_notification(settings):
     assert heard == ["Deleted"]
 
 
-def test_unset_refuses_while_an_async_observer_reaches_the_deletion(settings):
+def test_delitem_and_delete_and_wait_remove_dynamic_entries(settings):
+    settings.plugins["alpha"] = {"enabled": True}
+    settings.plugins["beta"] = {"enabled": True}
+    del settings["plugins.alpha"]
+    assert "alpha" not in dict(settings.plugins)
+
+    heard: list[str] = []
+
+    @settings.plugins.on_change()
+    async def hear(_section, changes):
+        heard.extend(change.path for change in changes)
+
+    asyncio.run(settings.plugins.delete_and_wait("beta"))
+    assert "beta" not in dict(settings.plugins)
+    assert heard == ["beta"]
+
+
+def test_del_and_delitem_refuse_while_an_async_observer_reaches_the_deletion(
+    settings,
+):
     settings.plugins["ghost"] = {"enabled": True}
 
     @settings.plugins.on_change()
@@ -203,4 +225,6 @@ def test_unset_refuses_while_an_async_observer_reaches_the_deletion(settings):
 
     with pytest.raises(AsyncObserversNotCalled):
         del settings.plugins.ghost
+    with pytest.raises(AsyncObserversNotCalled):
+        del settings.plugins["ghost"]
     assert settings.plugins["ghost"].enabled is True  # nothing was removed

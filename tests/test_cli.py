@@ -12,7 +12,7 @@ from typing import Annotated
 import pytest
 from pydantic import Field
 
-from notifig import CLIFlags, Config, ConfigSection, Delimited
+from notifig import CLIFlags, Config, ConfigDict, ConfigSection, Delimited
 
 from .conftest import set_argv
 
@@ -111,3 +111,35 @@ def test_a_shortcut_on_a_nested_field_can_shorten_the_path(monkeypatch):
 
     set_argv(monkeypatch, "-u", "https://short.test")
     assert ShortNested().api.url == "https://short.test"
+
+
+def test_cli_shortcuts_in_model_config_and_collisions(monkeypatch):
+    class WithShortcuts(Config):
+        model_config = ConfigDict(
+            cli_shortcuts={"port": "p", "name": ["n", "app-name"]}
+        )
+        port: int = 8000
+        name: str = "default"
+
+    set_argv(monkeypatch, "-p", "8080", "--app-name", "named")
+    parsed = WithShortcuts()
+    assert (parsed.port, parsed.name) == (8080, "named")
+
+    class Colliding(Config):
+        model_config = ConfigDict(cli_shortcuts={"name": "d"})
+        port: Annotated[int, CLIFlags("d")] = 8000
+        name: str = "default"
+
+    with pytest.raises(ValueError, match="claimed by both"):
+        Colliding(parse_cli=False)
+
+    class BothWays(Config):
+        model_config = ConfigDict(cli_shortcuts={"port": "d"})
+        port: Annotated[int, CLIFlags("d")] = 8000
+
+    with pytest.raises(ValueError, match="claimed by both"):
+        BothWays(parse_cli=False)
+
+
+def test_cli_flags_to_argparse_formats_short_and_long_flags():
+    assert CLIFlags("c", "config_file").to_argparse() == ["-c", "--config-file"]

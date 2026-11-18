@@ -12,11 +12,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
 import pytest
-from pydantic import Field, ValidationError, model_validator
+from pydantic import (
+    AfterValidator,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
-from notifig import Config, ConfigSection, PathNotFound
+from notifig import Config, ConfigDict, ConfigSection, PathNotFound
+from notifig.exceptions import OverlappingChangePaths
 
 from .conftest import ApiConfig, make_settings, write_files
 
@@ -204,3 +212,82 @@ def test_a_frozen_field_still_refuses_a_write():
     with pytest.raises(ValidationError, match="frozen"):
         settings.labelled.set(frozen=1)
     assert settings.labelled.frozen == 0
+
+
+def test_a_frozen_section_refuses_every_write():
+    class FrozenSection(ConfigSection):
+        model_config = ConfigDict(frozen=True)
+        port: int = 8000
+
+    class FrozenSettings(Config):
+        frozen: FrozenSection = Field(default_factory=FrozenSection)
+
+    settings = FrozenSettings(parse_cli=False)
+    with pytest.raises(ValidationError, match="frozen"):
+        settings.frozen.set(port=9000)
+    assert settings.frozen.port == 8000
+
+
+def test_overlapping_paths_in_a_batch_are_refused():
+    settings = make_settings()
+    with pytest.raises(OverlappingChangePaths, match="'api' and 'api.url'"):
+        settings.set(
+            api={"url": "https://a.test"},
+            **{"api.url": "https://b.test"},
+        )
+    assert settings.api.url == "https://example.test/v1"
+
+
+def test_unwritten_fields_do_not_rerun_their_field_validators():
+    """Writing `other` must not run `tagged`'s non-idempotent validators a
+    second time on its already-validated live value."""
+
+    class NonIdempotent(ConfigSection):
+        annotated: Annotated[str, AfterValidator(lambda v: f"{v}!")] = "a"
+        decorated: str = "b"
+        shared_a: str = "x"
+        shared_b: str = "y"
+        other: int = 0
+
+        @field_validator("decorated")
+        @classmethod
+        def append_hash(cls, value: str) -> str:
+            return f"{value}#"
+
+        @field_validator("shared_a", "shared_b")
+        @classmethod
+        def append_star(cls, value: str) -> str:
+            return f"{value}*"
+
+    class AppSettings(Config):
+        box: NonIdempotent = Field(default_factory=NonIdempotent)
+
+    settings = AppSettings(
+        box={"annotated": "a", "decorated": "b", "shared_a": "x", "shared_b": "y"},
+        parse_cli=False,
+    )
+    assert (
+        settings.box.annotated,
+        settings.box.decorated,
+        settings.box.shared_a,
+        settings.box.shared_b,
+    ) == ("a!", "b#", "x*", "y*")
+
+    # Writing `other` and `shared_a` runs `append_star` on `shared_a` only;
+    # `annotated`, `decorated`, and `shared_b` are untouched.
+    settings.box.set(other=1, shared_a="x2")
+    assert (
+        settings.box.annotated,
+        settings.box.decorated,
+        settings.box.shared_a,
+        settings.box.shared_b,
+    ) == ("a!", "b#", "x2*", "y*")
+
+
+def test_a_coerced_write_that_equals_the_live_value_notifies_nobody():
+    settings = make_network_settings()
+    heard = record_changes(settings)
+    # `"1000"` differs from `1000` before validation, then validates to `1000`.
+    settings.ports.set(low="1000")
+    assert settings.ports.low == 1000
+    assert heard == []

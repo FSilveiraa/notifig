@@ -111,12 +111,12 @@ def test_t1_a_malformed_block_is_a_load_error():
         Settings(plugins={"ghost": {"enabled": True, "surplus": 1}}, parse_cli=False)
 
 
-def test_t1_validate_assignment_runs_on_base_model_setattr():
-    """T1. `set_type` stores entries with `BaseModel.__setattr__` ON PURPOSE:
-    the re-validation it triggers is what stamps the entry's `_name` through
-    `_stamp_parent_on_subsections` and records the name in
-    `__pydantic_fields_set__`, so `/config save` round-trips the entry. Losing
-    that would silently break persistence, not crash."""
+def test_t1_dynamic_entry_writes_stamp_name_and_fields_set():
+    """T1. Writing a dynamic entry onto `DynamicSection` commits it into
+    `__pydantic_extra__`, stamps its `_name` and `_parent` through
+    `_stamp_parent_on_subsections`, and records the name in
+    `__pydantic_fields_set__`, so `save()` with `exclude_unset=True`
+    round-trips the entry."""
 
     class Entry(ConfigSection):
         enabled: bool = True

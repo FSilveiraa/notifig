@@ -8,13 +8,16 @@ everything, and lets the path's extension pick the format.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 import yaml
 
 from notifig import Config, UnknownFormat
+from notifig.sources import save_config
+from notifig.utils import nested_include
 
-from .conftest import write_files
+from .conftest import make_settings, write_files
 
 
 class Settings(Config):
@@ -74,3 +77,92 @@ def test_save_refuses_an_extension_no_writer_knows(tmp_path):
 def test_save_without_a_path_or_a_read_file_raises():
     with pytest.raises(ValueError, match="no path was given"):
         Settings(parse_cli=False).save()
+
+
+def test_save_preserves_the_existing_files_permissions(tmp_path):
+    target = tmp_path / "secret.yaml"
+    target.write_text("api_url: old\n")
+    os.chmod(target, 0o600)
+
+    Settings(api_url="new", parse_cli=False).save(target)
+
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_auto_save_patches_only_changed_paths_and_never_leaks_env(
+    tmp_path, monkeypatch
+):
+    (path,) = write_files(
+        tmp_path,
+        **{"conf.yaml": "api:\n  url: https://from-file.test\n  model: kept\n"},
+    )
+    monkeypatch.setenv("API__INNER__TOKEN", "secret-from-env")
+    settings = make_settings(config_files=[path], auto_save=True)
+
+    settings.api.url = "https://updated.test"
+
+    # `api.url` updated, `api.model` survived from the file, and `api.inner.token`
+    # from the environment was never written out.
+    assert yaml.safe_load((tmp_path / "conf.yaml").read_text()) == {
+        "api": {
+            "url": "https://updated.test",
+            "model": "kept",
+        }
+    }
+
+
+def test_auto_save_removes_deleted_entries_and_prunes_empty_sections(tmp_path):
+    (path,) = write_files(
+        tmp_path,
+        **{
+            "conf.yaml": (
+                "api:\n  url: https://example.test/v1\n"
+                "plugins:\n  ghost:\n    enabled: true\n"
+            )
+        },
+    )
+    settings = make_settings(config_files=[path], auto_save=True)
+
+    settings.plugins.delete("ghost")
+
+    # Deleting `plugins.ghost` emptied `plugins`, so `_prune_empty` dropped it too.
+    assert yaml.safe_load((tmp_path / "conf.yaml").read_text()) == {
+        "api": {"url": "https://example.test/v1"}
+    }
+
+
+def test_auto_save_tolerates_removing_a_path_missing_from_the_file(tmp_path):
+    (path,) = write_files(
+        tmp_path, **{"conf.yaml": "api:\n  url: https://example.test/v1\n"}
+    )
+    settings = make_settings(config_files=[path])
+    settings.plugins["ghost"] = {"enabled": True}
+    settings.auto_save = True
+
+    settings.plugins.delete("ghost")
+
+    assert yaml.safe_load((tmp_path / "conf.yaml").read_text()) == {
+        "api": {"url": "https://example.test/v1"},
+        "auto_save": True,
+    }
+
+
+def test_save_config_patch_creates_a_missing_file(tmp_path):
+    target = tmp_path / "created.json"
+    save_config({"api_url": "fresh"}, target, patch=True)
+    assert json.loads(target.read_text()) == {"api_url": "fresh"}
+
+
+def test_auto_save_without_a_config_file_raises():
+    settings = Settings(auto_save=True, parse_cli=False)
+    with pytest.raises(ExceptionGroup) as raised:
+        settings.api_url = "changed"
+    assert isinstance(raised.value.exceptions[0], ValueError)
+    assert "no config file was read" in str(raised.value.exceptions[0])
+
+
+def test_nested_include_collapses_narrower_paths_under_wider_ones():
+    assert nested_include(["api.inner.token", "api", "plugins.ghost"]) == {
+        "api": True,
+        "plugins": {"ghost": True},
+    }

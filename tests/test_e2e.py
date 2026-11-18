@@ -26,7 +26,6 @@ from notifig import (
     Updated,
 )
 from notifig.section.dynamic import DynamicSection
-from notifig.sources import save_config
 
 from .conftest import (
     EntryConfig,
@@ -212,7 +211,7 @@ def test_the_config_saves_and_reloads_identically(tmp_path, monkeypatch):
     settings.api.origins = ["https://a.test"]
 
     saved = tmp_path / "saved.toml"
-    save_config(settings.model_dump(mode="json", exclude_unset=True), saved)
+    settings.save(saved)
 
     reloaded = Settings(config_files=[str(saved)], parse_cli=False)
 

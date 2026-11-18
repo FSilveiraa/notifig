@@ -141,3 +141,18 @@ def test_observers_inside_a_replaced_section_hear_inner_changes(settings):
     settings.set(api={"url": "https://example.test/v1", "inner": {"token": "t3"}})
     assert heard_api == ["inner.token"]
     assert heard_inner == ["token"]
+
+
+def test_observers_inside_a_replaced_dynamic_section_hear_created_and_deleted_entries(
+    settings,
+):
+    settings.plugins["old"] = {"enabled": True}
+    heard_plugins: list[tuple[str, str]] = []
+
+    @settings.plugins.on_change()
+    def on_plugins(_section, changes):
+        heard_plugins.extend((type(c).__name__, c.path) for c in changes)
+
+    settings.set(plugins={"fresh": {"enabled": False}})
+    assert ("Created", "fresh") in heard_plugins
+    assert ("Deleted", "old") in heard_plugins

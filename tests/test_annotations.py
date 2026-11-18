@@ -310,3 +310,37 @@ def test_paths_write_back_as_strings():
     adapter = TypeAdapter(AbsolutePath)
     resolved = adapter.validate_python("/tmp/x")
     assert adapter.dump_python(resolved, mode="json") == "/tmp/x"
+
+
+def test_choice_and_delimited_produce_string_json_schemas():
+    class SchemaHolder(BaseModel):
+        backend: BackendChoice = BACKENDS["memory"]
+        tags: Annotated[list[str], Delimited()] = []
+
+    schema = SchemaHolder.model_json_schema()
+    assert schema["properties"]["backend"]["type"] == "string"
+    assert schema["properties"]["backend"]["enum"] == ["memory", "redis"]
+    assert schema["properties"]["tags"]["type"] == "string"
+
+
+def test_choice_infers_label_through_optional_and_falls_back_on_containers():
+    opt_adapter = TypeAdapter(Annotated[Backend | None, Choice(BACKENDS)])
+    with pytest.raises(ValidationError, match="Not a valid Backend"):
+        opt_adapter.validate_python("nope")
+
+    # A multi-member union is not a single named type, so label falls back to "choice".
+    union_adapter = TypeAdapter(Annotated[int | str, Choice({"one": 1})])
+    with pytest.raises(ValidationError, match="Not a valid choice"):
+        union_adapter.validate_python("two")
+
+
+def test_choice_serialization_raises_when_current_value_was_removed_from_mapping():
+    live_map = {"a": Backend("a"), "b": Backend("b")}
+
+    class LiveHolder(BaseModel):
+        item: Annotated[Backend, Choice(live_map)]
+
+    holder = LiveHolder(item="a")
+    del live_map["a"]
+    with pytest.raises(Exception, match="is not one of"):
+        holder.model_dump(mode="json")
