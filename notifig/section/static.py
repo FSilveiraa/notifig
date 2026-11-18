@@ -405,23 +405,52 @@ class ConfigSection(BaseModel):
         # Who needs notifications about what. Maps a section's python ID to itself
         # and the dict of path->ConfigChange for that section.
         to_notify: dict[int, tuple[ConfigSection, dict[str, ConfigChange]]] = {}
-        for change in changes:
-            _self, my_own_changes = to_notify.setdefault(id(self), (self, {}))
-            my_own_changes[change.path] = change
-            # Down: every section between self and the owner of the changed field
-            path_to_parent, _delimiter, _leaf_name = change.path.rpartition(".")
-            if path_to_parent:
-                for sub_path, section in self.walk(path_to_parent):
-                    _section, section_paths = to_notify.setdefault(
-                        id(section), (section, {})
+
+        def _add_changes_along_path(start_section: ConfigSection, change: ConfigChange) -> None:
+            """Adds a change for each section across change.path"""
+            parent_path, _leaf_name = split_parent_path_and_leaf(change.path)
+            _section, own_changes = to_notify.setdefault(
+                id(start_section), (start_section, {})
+            )
+            own_changes[change.path] = change
+            # Walk down each section between start_section and the leaf owner
+            # NOTE: walk the parent path, which we know is composed of only sections,
+            #  don't enter the leaf
+            if parent_path:  # Make sure this isn't the change's root
+                for sub_path, subsection in start_section.walk(parent_path):
+                    _subsection, subsection_changes = to_notify.setdefault(
+                        id(subsection), (subsection, {})
                     )
-                    # Create a new ConfigChange with the path for the sub-section
-                    # Ex: change happened at `interface.tui.theme`, there's an observer
-                    #  at `interface`, it needs to be notified about `tui.theme`.
+                    # The path to notify this section about is the path from
+                    #  this section down to the leaf
                     path_to_notify = change.path.removeprefix(f"{sub_path}.")
-                    section_paths[path_to_notify] = replace(change, path=path_to_notify)
-            # Up: every section above self
-            parent, path_from_leaf_to_parent = self, change.path
+                    subsection_changes[path_to_notify] = replace(
+                        change,
+                        path=path_to_notify
+                    )
+
+        for change in changes:
+            # 1. Down: every section between self and the owner of the changed field
+            #  If the leaf is a section, we also gather sub-notifications
+            _add_changes_along_path(start_section=self, change=change)
+            if (
+                isinstance(change, Updated)
+                and _is_section(change.before)
+                and _is_section(change.after)
+            ):
+                subsection = self[change.path]
+                # Find changes by comparing both sections, then add changes
+                #  for each section along that path
+                for sub_change in change.after._find_changes_compared_to(change.before):
+                    _add_changes_along_path(
+                        # Use the actual section, not the notification values
+                        start_section=subsection,
+                        change=sub_change,
+                    )
+
+            # 2. Up: every section above self until we hit the root
+            parent = self
+            path_from_leaf_to_parent = change.path
             while parent._parent is not None:
                 path_from_leaf_to_parent = f"{parent._name}.{path_from_leaf_to_parent}"
                 parent = parent._parent
@@ -927,6 +956,39 @@ class ConfigSection(BaseModel):
             # the other one, recurse inside it and copy its observers
             if _is_section(value) and _is_section(other_value):
                 value._take_observers_from(other_value)
+
+    def _find_changes_compared_to(self, other: ConfigSection) -> list[ConfigChange]:
+        """
+        Compares this section to a `other` and returns the list of change
+         notifications assuming this section is the new state. In clearer
+         words, returns the list of notifications needed to turn `other`
+         `self`.
+        Useful when there is a change notification for an entire section
+         being swapped
+        """
+        changes: list[ConfigChange] = []
+        # 1. Find updates and creations
+        for name, value in self:
+            if name not in other:
+                changes.append(Created(path=name, value=value))
+            else:
+                other_value = other[name]
+                if _is_section(value) and _is_section(other_value):
+                    # Add a change per changed sub-section entry
+                    changes.extend(
+                        # Fix the paths for changes coming from sub-sections
+                        replace(change, path=f"{name}.{change.path}")
+                        for change in value._find_changes_compared_to(other_value)
+                    )
+                elif value != other_value:
+                    changes.append(
+                        Updated(path=name, before=other_value, after=value)
+                    )
+        # 2. Find deletions
+        for name, value in other:
+            if name not in self:
+                changes.append(Deleted(path=name, value=value))
+        return changes
 
 
 async def _run_async_observers(pending: list[Awaitable]) -> None:

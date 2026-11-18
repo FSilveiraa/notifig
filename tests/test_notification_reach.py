@@ -117,3 +117,24 @@ def test_a_change_that_changes_nothing_notifies_nobody(settings):
     settings.api.model = None  # already None
     settings.api.url = "https://example.test/v1"  # already this
     assert heard == []
+
+
+def test_observers_inside_a_replaced_section_hear_inner_changes(settings):
+    heard_api: list[str] = []
+    heard_inner: list[str] = []
+    @settings.api.on_change()
+    def on_api(_section, changes):
+        heard_api.extend(change.path for change in changes)
+    @settings.api.inner.on_change()
+    def on_inner(_section, changes):
+        heard_inner.extend(change.path for change in changes)
+    # 1. Dotted write from root: exercises the existing Down walk (`self.walk("api.inner")`)
+    settings.set(**{"api.inner.token": "t2"})
+    assert heard_api == ["inner.token"]
+    assert heard_inner == ["token"]
+    # 2. Whole-section replacement: exercises `_find_changes_compared_to` + routing into `api` and `api.inner`
+    heard_api.clear()
+    heard_inner.clear()
+    settings.set(api={"url": "https://example.test/v1", "inner": {"token": "t3"}})
+    assert heard_api == ["inner.token"]
+    assert heard_inner == ["token"]
