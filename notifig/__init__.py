@@ -30,6 +30,7 @@ from .exceptions import (
     EntryRequiresData,
     InvalidEntryName,
     NotASection,
+    OverlappingChangePaths,
     PathNotFound,
 )
 from .meta import ConfigDict
@@ -56,6 +57,7 @@ __all__ = [
     "InvalidEntryName",
     "EntryRequiresData",
     "CantDeleteRetypeDeclaredField",
+    "OverlappingChangePaths",
     "AsyncObserversNotCalled",
     "FILE_EXTENSIONS",
     "UnknownFormat",
