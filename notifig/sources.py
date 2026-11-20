@@ -5,11 +5,16 @@ import tempfile
 from collections.abc import Iterable, Sequence
 from os import PathLike
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 import anyconfig
 from pydantic import TypeAdapter
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+)
 
 from .meta import ConfigDict
 from .utils import absolute_path
@@ -231,3 +236,16 @@ class ConfigFileSource(PydanticBaseSettingsSource):
         )
         data[self._field_name] = read
         return data
+
+
+class DotEnvSourceIgnoringUnrelatedKeys(DotEnvSettingsSource):
+    """A `DotEnvSettingsSource` that ignores unrelated keys in `.env`."""
+
+    @override
+    def __call__(self):
+        # HACK: `DotEnvSettingsSource.__call__` calls `EnvSettingsSource.__call__`
+        # to collect declared fields and then appends every remaining key from the
+        # `.env` file regardless of `extra`. Calling `EnvSettingsSource.__call__`
+        # directly skips that second pass so `extra="forbid"` on `ConfigSection`
+        # does not reject unrelated `.env` keys.
+        return EnvSettingsSource.__call__(self)

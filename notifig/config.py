@@ -13,7 +13,7 @@ from pydantic_settings import (
 from .annotation import AbsolutePath, Delimited
 from .meta import ConfigDict
 from .section.static import ConfigSection
-from .sources import ConfigFileSource, save_config
+from .sources import ConfigFileSource, DotEnvSourceIgnoringUnrelatedKeys, save_config
 from .utils import nested_include
 from .write.notification import ConfigChange, Deleted
 
@@ -30,6 +30,7 @@ class Config(BaseSettings, ConfigSection):
         # Reasoning: A `.env` is the one file expected to be picked up by default
         #  on any system.
         env_file=".env",
+        ignore_unrelated_dotenv=False,
     )
 
     # Whether to read `sys.argv`. An internal switch, never saved or edited
@@ -141,6 +142,10 @@ class Config(BaseSettings, ConfigSection):
                         f"{claimed_by[flag]!r} and {path!r}"
                     )
                 claimed_by[flag] = path
+
+        if cls.model_config.get("ignore_unrelated_dotenv", False):
+            # Ignore unrelated entries in .env
+            dotenv_settings = DotEnvSourceIgnoringUnrelatedKeys(settings_cls)
 
         # Precedence high->low: init kwargs, CLI, env, then config files.
         return (

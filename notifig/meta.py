@@ -13,6 +13,9 @@ class ConfigDict(SettingsConfigDict, total=False):
 
     `env_file` is inherited from `Config` as `".env"`, so a `.env` in the working
     directory is read without naming it. Set `env_file=None` to disable it.
+
+    NOTE: although it would be great for this class to be able to hold defaults,
+    it can't because SettingsConfigDict subclasses TypedDict.
     """
 
     # Config files read when no source names any; each is read only if it exists
@@ -26,3 +29,6 @@ class ConfigDict(SettingsConfigDict, total=False):
     # Whether a merged list drops repeats (keeping the first sighting). Only
     # consulted when `merge_lists_in_files` is on.
     merge_lists_unique: bool
+
+    # Whether to ignore all unrelated entries in a .env file, raises if False
+    ignore_unrelated_dotenv: bool
