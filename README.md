@@ -1,4 +1,10 @@
-# Notifig
+![logo](./docs/logo-light.svg)
+![logo](./docs/logo-dark.svg)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+  <img src="docs/logo-light.svg" alt="notifig" width="320">
+</picture>
 
 **A highly declarative, strictly typed, reactive config**
 
@@ -18,7 +24,7 @@ from pydantic import Field
 from notifig import Choice, Delimited, CLIFlags
 
 
-class Color(Enum):
+class Color(Enum)
     RED = "#FF0000"
     GREEN = "#00FF00"
     BLUE = "#0000FF"

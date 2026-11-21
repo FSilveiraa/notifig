@@ -562,7 +562,7 @@ class ConfigSection(BaseModel):
         which may be exact fields or section prefixes. Empty *paths means every change.
         ```python
             @config.on_change("api.model", "api.url")
-            async def _on_api_change(config, paths): ...
+            async def _on_api_change(config: ConfigSection, changes): ...
         ```
         """
         # Validate that registered paths exist, or stop existing
