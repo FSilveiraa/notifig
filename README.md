@@ -1,9 +1,6 @@
-![logo](./docs/logo-light.svg)
-![logo](./docs/logo-dark.svg)
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
-  <img src="docs/logo-light.svg" alt="notifig" width="320">
+  <img src="docs/logo-light.svg" alt="notifig" width="720">
 </picture>
 
 **A highly declarative, strictly typed, reactive config**
