@@ -3,9 +3,8 @@
   <img src="docs/logo-light.svg" alt="notifig" width="720">
 </picture>
 
-**A highly declarative, strictly typed, reactive config**
-
-Notifig is a configuration library built on Pydantic, and strongly rooted on these principles:
+**Notifig is a highly declarative, reactive, strictly typed library for project configurations**,
+strongly rooted on these principles:
 
 <details>
 <summary><b>Declaration is behavior</b> - The shape of a config field derives its usage.</summary>
@@ -147,20 +146,25 @@ pip install notifig
 Requires Python ≥ 3.13.
 
 
-### Features
-- **Custom annotations** - Notifig introduces several custom Pydantic annotations to express behavior from types:
-  - `CLIFlags` - adds a shortcut CLI flag for a field
-  - `Choice` - restricts the values a field can take according to a list of options
-  - `CommaSeparated` - allows parsing a list delimited by `,`
-  - `Link` - links one field to another through its full path 
-- **Observers** - 
-- Static and Dynamic sections
-- Obvious usage - `bar = section.foo`, `section["foo"] = "baz"`, `section.get("foo.bar")`, `for name, field in section`
-- File formats: supports config files in JSON, YAML, TOML, INI and .env
+## Features
+
+- **Atomic batches** - Change multiple fields at once, retaining the original state upon failure.
+- [**Observers**](./docs/about.md#observers) - register callables to react to config changes
+(supports asyncio).
+- [**Custom annotations**](./docs/annotations.md#annotations) - Notifig introduces several
+custom Pydantic annotations to express behavior from types:
+  - [CLIFlags](./docs/annotations.md#cli-flags) - add shortcut CLI flags for a field
+  - [Choice](./docs/annotations.md#choice) - restricts options for a field, mapping names to values
+  - [Delimited](./docs/annotations.md#delimited) - parses and serializes a string like `"a|b|c"` into a typed list
+  - [Link](./docs/annotations.md#link) - one field mirrors another by path reference
+  - [Paths](./docs/annotations.md#paths) - annotations for filesystem paths, absolute paths and glob patterns
+- **Dynamic entries** - `DynamicSection` can add, remove and re-type new entries at runtime
+- **File formats** - supports a wide range of file formats, including JSON, YAML, TOML, INI and .env
 
 
 ### Built on
 
-- [Pydantic](https://pydantic.dev/) - The typing foundation, model validators and serializers, type adapters.
-- [Pydantic Settings](https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/) - 
-- [anyconfig](https://github.com/ssato/python-anyconfig) - File serialization library with wide format support.
+- [Pydantic](https://pydantic.dev/) - Type foundation
+- [Pydantic Settings](https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/) -
+Loading data from CLI+files+env into a validated model
+- [anyconfig](https://github.com/ssato/python-anyconfig) - File loading and serialization with wide format support.
