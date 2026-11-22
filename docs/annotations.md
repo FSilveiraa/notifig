@@ -80,7 +80,7 @@ assert config.ports == [8080, 8443]
 `Link(path: str)` links a config entry (*target*) to another entry (*source*) through its path.
 Whenever the source changes, so does the target.
 
-It's especially useful to mirror a value across several sub-sections in a distributed config
+It's especially useful to mirror a value across several sub-sections in a scoped config
 structure. 
 
 ```python
