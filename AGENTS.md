@@ -117,9 +117,9 @@ tests/
 
 - Build trees with `make_settings()` from `tests/conftest.py`, and add new shared
   shapes there. Tests never share mutable state.
-- **Always construct `Config` subclasses with `parse_cli=False`** unless the test is
-  about the CLI. In that case use `set_argv(monkeypatch, ...)`, so pytest's own argv is
-  never parsed.
+- **Always subclass `TestConfig` from `tests/conftest.py` instead of `Config`** unless the
+  test is about the CLI. In that case subclass `Config` and use `set_argv(monkeypatch, ...)`,
+  so pytest's own argv is never parsed.
 - Use `tmp_path` and `write_files()` for file-source tests. INI and `.env` have their own
   dedicated tests because their shapes don't fit `parametrize`.
 - Test names are sentences that describe the behavior

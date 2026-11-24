@@ -18,10 +18,12 @@ from typing import ClassVar
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from notifig import Config, ConfigSection
+from notifig import ConfigSection
 from notifig.section.dynamic import DynamicSection
 from notifig.section.static import ConfigSection as BaseSection
 from notifig.section.validation import candidate_class_from_section_class
+
+from .conftest import TestConfig
 
 
 def test_t1_generic_metadata_carries_the_subscript_argument():
@@ -60,10 +62,10 @@ def test_t1_the_write_path_instantiates_entries_eagerly():
     class Plugins(DynamicSection[Entry]):
         pass
 
-    class Settings(Config):
+    class Settings(TestConfig):
         plugins: Plugins
 
-    settings = Settings(plugins={}, parse_cli=False)
+    settings = Settings(plugins={})
     settings.plugins["ghost"] = {"enabled": False}
     entry = settings.plugins["ghost"]
     assert isinstance(entry, Entry)  # instantiated, not a raw dict
@@ -84,10 +86,10 @@ def test_t1_constructor_data_instantiates_entries_eagerly():
     class Plugins(DynamicSection[Entry]):
         pass
 
-    class Settings(Config):
+    class Settings(TestConfig):
         plugins: Plugins
 
-    settings = Settings(plugins={"ghost": {"enabled": False}}, parse_cli=False)
+    settings = Settings(plugins={"ghost": {"enabled": False}})
     entry = settings.plugins["ghost"]
     assert isinstance(entry, Entry)  # instantiated, not a raw dict
     assert entry.enabled is False
@@ -104,11 +106,11 @@ def test_t1_a_malformed_block_is_a_load_error():
     class Plugins(DynamicSection[StrictEntry]):
         pass
 
-    class Settings(Config):
+    class Settings(TestConfig):
         plugins: Plugins
 
     with pytest.raises(ValidationError):
-        Settings(plugins={"ghost": {"enabled": True, "surplus": 1}}, parse_cli=False)
+        Settings(plugins={"ghost": {"enabled": True, "surplus": 1}})
 
 
 def test_t1_dynamic_entry_writes_stamp_name_and_fields_set():
@@ -124,10 +126,10 @@ def test_t1_dynamic_entry_writes_stamp_name_and_fields_set():
     class Plugins(DynamicSection[Entry]):
         pass
 
-    class Settings(Config):
+    class Settings(TestConfig):
         plugins: Plugins
 
-    settings = Settings(plugins={}, parse_cli=False)
+    settings = Settings(plugins={})
     plugins = settings.plugins
     plugins["ghost"] = {"enabled": True}
     assert "ghost" in plugins.__pydantic_fields_set__
@@ -161,10 +163,10 @@ def test_t2_private_and_extra_storage_are_the_same_namespace():
     class Plugins(DynamicSection[Entry]):
         pass
 
-    class Settings(Config):
+    class Settings(TestConfig):
         plugins: Plugins
 
-    settings = Settings(plugins={}, parse_cli=False)
+    settings = Settings(plugins={})
     settings.plugins["ghost"] = {"enabled": True}
     assert "ghost" in settings.plugins.model_extra
     assert "ghost" in settings.plugins  # __contains__ sees it
@@ -183,10 +185,10 @@ def test_t1_model_validate_keeps_section_instances_by_identity():
     class Api(ConfigSection):
         url: str = "https://default.test"
 
-    class Settings(Config):
+    class Settings(TestConfig):
         api: Api
 
-    settings = Settings(api=Api(), parse_cli=False)
+    settings = Settings(api=Api())
     candidate = candidate_class_from_section_class(
         Settings, frozenset({"api"})
     ).model_validate({"api": settings.api})
@@ -204,10 +206,10 @@ def test_t1_a_validation_candidate_does_not_reparent_the_sections_it_is_built_fr
     class Api(ConfigSection):
         url: str = "https://default.test"
 
-    class Settings(Config):
+    class Settings(TestConfig):
         api: Api
 
-    settings = Settings(api=Api(), parse_cli=False)
+    settings = Settings(api=Api())
     api = settings.api
     assert api._parent is settings
 
@@ -227,10 +229,10 @@ def test_t1_a_validation_candidate_registers_no_observer():
     class Api(ConfigSection):
         url: str = "https://default.test"
 
-    class Settings(Config):
+    class Settings(TestConfig):
         api: Api
 
-    settings = Settings(api=Api(), parse_cli=False)
+    settings = Settings(api=Api())
     assert len(settings._observers) == 1  # the auto-save observer
 
     candidate = candidate_class_from_section_class(

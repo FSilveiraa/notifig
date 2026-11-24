@@ -13,8 +13,16 @@ from typing import ClassVar
 
 import pytest
 
-from notifig import Config, ConfigSection
-from notifig.section.dynamic import DynamicSection
+from notifig import Config, ConfigDict, ConfigSection, DynamicSection
+
+
+class TestConfig(Config):
+    # Pytest treats any class named `Test*` as a test class, this prevents it
+    __test__ = False
+
+    model_config = ConfigDict(
+        cli_parse_args=False,
+    )
 
 
 class EntryConfig(ConfigSection):
@@ -58,7 +66,7 @@ def make_settings(*, plugins_section=None, **values):
     class PluginsConfig(base):  # type: ignore[misc, valid-type]
         pass
 
-    class Settings(Config):
+    class Settings(TestConfig):
         api: ApiConfig
         plugins: PluginsConfig
 
@@ -67,8 +75,8 @@ def make_settings(*, plugins_section=None, **values):
         "plugins": {},
     }
     data.update(values)
-    # `parse_cli=False`: no test may read pytest's own argv by accident.
-    return Settings(**data, parse_cli=False)
+    # `TestConfig`: no test may read pytest's own argv by accident.
+    return Settings(**data)
 
 
 def write_files(directory: Path, **files: str) -> list[str]:

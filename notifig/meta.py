@@ -31,4 +31,4 @@ class ConfigDict(SettingsConfigDict, total=False):
     merge_lists_unique: bool
 
     # Whether to ignore all unrelated entries in a .env file, raises if False
-    ignore_unrelated_dotenv: bool
+    dotenv_ignore_unrelated: bool

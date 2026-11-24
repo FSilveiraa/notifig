@@ -13,21 +13,21 @@ import os
 import pytest
 import yaml
 
-from notifig import Config, UnknownFormat
+from notifig import UnknownFormat
 from notifig.sources import save_config
 from notifig.utils import nested_include
 
-from .conftest import make_settings, write_files
+from .conftest import TestConfig, make_settings, write_files
 
 
-class Settings(Config):
+class Settings(TestConfig):
     api_url: str = "unset"
     feature: str | None = None
 
 
 def test_save_writes_to_the_last_file_it_read(tmp_path):
     (path,) = write_files(tmp_path, **{"conf.yaml": "api_url: from-file\n"})
-    settings = Settings(config_files=[path], parse_cli=False)
+    settings = Settings(config_files=[path])
 
     settings.api_url = "changed"
     settings.save()
@@ -38,7 +38,7 @@ def test_save_writes_to_the_last_file_it_read(tmp_path):
 
 
 def test_save_writes_only_the_values_that_were_set(tmp_path):
-    settings = Settings(api_url="from-code", parse_cli=False)
+    settings = Settings(api_url="from-code")
     target = tmp_path / "out.json"
 
     settings.save(target)
@@ -47,12 +47,12 @@ def test_save_writes_only_the_values_that_were_set(tmp_path):
 
 
 def test_save_full_writes_every_field(tmp_path):
-    settings = Settings(api_url="from-code", parse_cli=False)
+    settings = Settings(api_url="from-code")
     target = tmp_path / "out.json"
 
     settings.save(target, full=True)
 
-    # `auto_save` is a real setting, not an internal switch like `parse_cli`, so
+    # `auto_save` is a real setting, not an internal switch like `config_files`, so
     # a full dump carries it too.
     assert json.loads(target.read_text()) == {
         "auto_save": False,
@@ -62,21 +62,21 @@ def test_save_full_writes_every_field(tmp_path):
 
 
 def test_what_save_wrote_reads_back(tmp_path):
-    first = Settings(api_url="from-code", parse_cli=False)
+    first = Settings(api_url="from-code")
     target = tmp_path / "out.yaml"
     first.save(target)
 
-    assert Settings(config_files=[str(target)], parse_cli=False).api_url == "from-code"
+    assert Settings(config_files=[str(target)]).api_url == "from-code"
 
 
 def test_save_refuses_an_extension_no_writer_knows(tmp_path):
     with pytest.raises(UnknownFormat):
-        Settings(parse_cli=False).save(tmp_path / "out.unknown")
+        Settings().save(tmp_path / "out.unknown")
 
 
 def test_save_without_a_path_or_a_read_file_raises():
     with pytest.raises(ValueError, match="no path was given"):
-        Settings(parse_cli=False).save()
+        Settings().save()
 
 
 def test_save_preserves_the_existing_files_permissions(tmp_path):
@@ -84,7 +84,7 @@ def test_save_preserves_the_existing_files_permissions(tmp_path):
     target.write_text("api_url: old\n")
     os.chmod(target, 0o600)
 
-    Settings(api_url="new", parse_cli=False).save(target)
+    Settings(api_url="new").save(target)
 
     assert target.stat().st_mode & 0o777 == 0o600
 
@@ -154,7 +154,7 @@ def test_save_config_patch_creates_a_missing_file(tmp_path):
 
 
 def test_auto_save_without_a_config_file_raises():
-    settings = Settings(auto_save=True, parse_cli=False)
+    settings = Settings(auto_save=True)
     with pytest.raises(ExceptionGroup) as raised:
         settings.api_url = "changed"
     assert isinstance(raised.value.exceptions[0], ValueError)

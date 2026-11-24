@@ -11,10 +11,10 @@ from __future__ import annotations
 import pytest
 from pydantic import Field
 
-from notifig import Config, ConfigSection, PathNotFound
+from notifig import ConfigSection, PathNotFound
 from notifig.exceptions import NotASection
 
-from .conftest import EntryConfig, make_settings
+from .conftest import EntryConfig, TestConfig, make_settings
 
 
 def test_name_attribute_and_dotted_path_agree(settings):
@@ -159,10 +159,10 @@ def test_walk_and_walk_schema_edges_and_excluded_subtrees(settings):
     class Hidden(ConfigSection):
         secret: str = "s"
 
-    class AppWithHidden(Config):
+    class AppWithHidden(TestConfig):
         visible: str = "v"
         hidden: Hidden = Field(default_factory=Hidden, exclude=True)
 
-    editable = AppWithHidden(parse_cli=False).editable_fields()
+    editable = AppWithHidden().editable_fields()
     assert "visible" in editable
     assert "hidden.secret" not in editable

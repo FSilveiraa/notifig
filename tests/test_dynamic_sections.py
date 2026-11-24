@@ -22,11 +22,17 @@ from typing import Any
 import pytest
 from pydantic import Field, ValidationError
 
-from notifig import Config, ConfigDict, PathNotFound
+from notifig import ConfigDict, PathNotFound
 from notifig.exceptions import CantDeleteRetypeDeclaredField, EntryRequiresData
 from notifig.section.dynamic import DynamicSection
 
-from .conftest import EntryConfig, PreservingPlugins, TypedEntry, make_settings
+from .conftest import (
+    EntryConfig,
+    PreservingPlugins,
+    TestConfig,
+    TypedEntry,
+    make_settings,
+)
 
 
 class NeedsData(EntryConfig):
@@ -137,7 +143,6 @@ def test_an_entry_name_cannot_carry_a_dot():
         type(settings)(
             api={"url": "https://example.test/v1"},
             plugins={"a.b": {"enabled": True}},
-            parse_cli=False,
         )
 
 
@@ -226,12 +231,11 @@ def test_an_untyped_dynamic_section_keeps_entries_in_unresolved_until_typed():
     class RawPlugins(DynamicSection[Any]):
         declared: str = "fixed"
 
-    class RawSettings(Config):
+    class RawSettings(TestConfig):
         plugins: RawPlugins = Field(default_factory=RawPlugins)
 
     settings = RawSettings(
         plugins={"declared": "custom", "alpha": {"enabled": False}},
-        parse_cli=False,
     )
     assert settings.plugins.declared == "custom"
     assert settings.plugins.unresolved == ["alpha"]
@@ -260,10 +264,10 @@ def test_declared_fields_on_a_dynamic_section_refuse_delete_set_type_and_remove_
     class MixedPlugins(DynamicSection[EntryConfig]):
         declared: str = "fixed"
 
-    class MixedSettings(Config):
+    class MixedSettings(TestConfig):
         plugins: MixedPlugins = Field(default_factory=MixedPlugins)
 
-    settings = MixedSettings(parse_cli=False)
+    settings = MixedSettings()
     with pytest.raises(CantDeleteRetypeDeclaredField):
         settings.plugins.delete("declared")
     with pytest.raises(CantDeleteRetypeDeclaredField):

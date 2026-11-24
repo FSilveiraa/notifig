@@ -23,10 +23,10 @@ from pydantic import (
     model_validator,
 )
 
-from notifig import Config, ConfigDict, ConfigSection, PathNotFound
+from notifig import ConfigDict, ConfigSection, PathNotFound
 from notifig.exceptions import OverlappingChangePaths
 
-from .conftest import ApiConfig, make_settings, write_files
+from .conftest import ApiConfig, TestConfig, make_settings, write_files
 
 
 class Ports(ConfigSection):
@@ -61,7 +61,7 @@ class Labelled(ConfigSection):
     frozen: int = Field(default=0, frozen=True)
 
 
-class NetworkSettings(Config):
+class NetworkSettings(TestConfig):
     name: str = "net"
     ports: Ports = Field(default_factory=Ports)
     clamped: Clamped = Field(default_factory=Clamped)
@@ -69,7 +69,7 @@ class NetworkSettings(Config):
 
 
 def make_network_settings(**values) -> NetworkSettings:
-    return NetworkSettings(**values, parse_cli=False)
+    return NetworkSettings(**values)
 
 
 def record_changes(section: ConfigSection) -> list[list[str]]:
@@ -219,10 +219,10 @@ def test_a_frozen_section_refuses_every_write():
         model_config = ConfigDict(frozen=True)
         port: int = 8000
 
-    class FrozenSettings(Config):
+    class FrozenSettings(TestConfig):
         frozen: FrozenSection = Field(default_factory=FrozenSection)
 
-    settings = FrozenSettings(parse_cli=False)
+    settings = FrozenSettings()
     with pytest.raises(ValidationError, match="frozen"):
         settings.frozen.set(port=9000)
     assert settings.frozen.port == 8000
@@ -259,12 +259,11 @@ def test_unwritten_fields_do_not_rerun_their_field_validators():
         def append_star(cls, value: str) -> str:
             return f"{value}*"
 
-    class AppSettings(Config):
+    class AppSettings(TestConfig):
         box: NonIdempotent = Field(default_factory=NonIdempotent)
 
     settings = AppSettings(
         box={"annotated": "a", "decorated": "b", "shared_a": "x", "shared_b": "y"},
-        parse_cli=False,
     )
     assert (
         settings.box.annotated,
