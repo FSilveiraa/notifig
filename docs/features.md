@@ -19,25 +19,6 @@ Configs are created by merging multiple data sources (highest to lowest priority
 
 Multiple changes for different paths can be applied to a section at once in one atomic change.
 
-### Transactions
-
-Changes are almost fully transactional, and I am looking into to ensuring full ACID compliance.
-
-- **Atomicity** - Any validation error fails the entire change batch, and the original state is retained.
-
-- **Consistency** - Values that would break validation are rejected before applying.
-Notifig doesn't roll back upon errors, it never commits them.
-
-- **Isolation** - Sections cannot expose a half-done state.
-This is ensured for single-threaded usage, however concurrent reading of a section can
-potentially view a version of a section in the middle of a post-validation commit.
-I'm planning to add a `Lock`-based solution to that, that will ensure middle states can't be seen.
-
-- **Durability** - Changes to a section can be persisted through [auto-saving](#auto-saving).
-However, this currently happens as a reaction to the changes, after the commit step.
-Errors that occur during the persistence step don't revert the transaction, and can leave
-a failed middle-state in the filesystem. I have plans to fix both of these.
-
 
 ### Multi-path changes
 

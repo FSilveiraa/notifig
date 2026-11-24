@@ -9,21 +9,24 @@ and persistable state tree for project settings
 
 ## Design
 
-- [**Living state tree**](./) -
-Settings exist across a mutable state register.
+- [**Living state tree**](./docs/principles.md#living-state-tree) -
+Each setting exists in a single source of truth,
+distributed across a structured state register.
 
 - [**Declaration is behavior**](./docs/principles.md#declaration-is-behavior) -
 A field's type derives its accepted values and usage.
-Illegal states should be impossible.
 
-- [**Transactional changes**](./docs/fea)
+- [**Transactional changes**](./docs/principles.md#transactional-changes) -
+Changes to the config are applied atomically.
+Inconsistent states aren't possible.
 
 - [**Scoped ownership**](./docs/principles.md#scoped-ownership) -
-Config structure emerges from project structure,
-each component declares their own section.
+Config structure naturally emerges from project structure.
+Each component can declare their own section.
 
-- [**Reactive state**](./docs/principles.md#reactive-state) -
-Changes within the config should immediately inform registered observers.
+- [**Reactive persistent state**](./docs/principles.md#reactive-persistent-state) -
+Changes within the config should immediately inform registered observers,
+and persist to file through optional auto-saving.
 
 
 ## Install
@@ -47,9 +50,10 @@ Requires Python ≥ 3.13.
 
 ## Features
 
-- [**Atomic batches**](./docs/features.md#atomic-writing) - change multiple fields at once, retaining the original state upon failure.
-- **[Aware auto-saving](./docs/features.md#saving)** - a config can export [manually](./docs/features.md#saving)
-or through [auto-saving](./docs/features.md#auto-saving), and only saves explicitly set fields.
+- [**Multi-path transactions**](./docs/features.md#changing) - change multiple fields atomically,
+retaining the original state upon failure.
+- [**Aware auto-saving**](./docs/features.md#saving) - a config can save [manually](./docs/features.md#saving)
+or through [auto-saving](./docs/features.md#auto-saving), only exporting explicitly set fields.
 - [**Observers**](./docs/features.md#observers) - register a callable or awaitable to react to config changes.
 - [**Custom annotations**](./docs/annotations.md#annotations) - Notifig introduces several Pydantic
 annotations that express behavior from types:

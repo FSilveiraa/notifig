@@ -1,6 +1,22 @@
+## Living state tree
+
+Settings should exist across a mutable state tree.
+Each field expresses a need by a project component and should be declared once,
+in a single register that [expresses its restrictions and behavior](#declaration-is-behavior),
+ideally [structured after the project it serves](#scoped-ownership).
+
+Perhaps the best illustration of this idea comes from `mobx-state-tree`'s [Project Philosophy](https://mobx-state-tree.js.org/intro/philosophy).
+It's a completely separate project in a different language and supporting its own features,
+which prevents long quotes, but the conceptual connection matters more:
+
+>Central in MST is the concept of a living tree. The tree consists of mutable, but strictly protected
+>objects enriched with runtime type information. In other words, each tree has a shape (type information)
+>and state (data).
+
+
 ## Declaration is behavior
 
-Validation, serialization, value choices, CLI flags, all follow from writing the field itself.
+Validation, serialization, value choices, CLI flags, should follow from writing the field itself.
 For example, this statement creates a `colors` field that only accepts certain values and can be
 set both with comma-separated values (`--color "blue,red""`) or explicit lists: 
 
@@ -38,51 +54,57 @@ colors: Annotated[
 ```
 
 
-## Single source of truth
+## Transactional changes
 
-A common example is mapping CLI flags to their config value, which usually involves maintaining a parallel
-dict that references fields by string name and needs to be manually kept in sync with the config itself:
+Changes are atomic and almost fully transactional, I am looking into ensuring full
+ACID compliance.
 
-```python
-class BadSettings:
-    foo: str
-    bar: str | None = None
-    baz: int  # We added baz, but forgot to add its CLI flag below
+- **Atomicity** - Any validation error fails the entire change batch, and the original
+state is retained.
 
-# If any field gets renamed or deleted, someone has to remember to change it here.
-CLI_FLAGS = {
-    "foo": "foo",
-    "f": "foo",
-    "bar": "bar"
-}
+- **Consistency** - Values that would break validation are rejected before applying.
+Notifig doesn't roll back upon errors, it never commits them.
 
-# Requires merging the CLI data into config fields 
-for flag, value in cli_data.items():
-    if (field := CLI_FLAGS[flag]):
-        setattr(config, field, value)
-```
+- **Isolation** - Sections cannot expose a half-done state.
+This is ensured for single-threaded usage, however concurrent reading of a section can
+potentially view a version of a section in the middle of a post-validation commit.
+I'm planning to add a `Lock`-based solution to that, that will ensure middle states can't be seen.
 
-With Notifig, the CLI flags live on their respective field declarations.
-Deleting or altering a field and all its flags only touches one statement, in a single place.
+- **Durability** - Changes to a section can be persisted through [auto-saving](./features.md#auto-saving).
+However, this currently happens as a reaction to the changes, after the commit step.
+Errors that occur during the persistence step don't revert the transaction, and can leave
+a failed middle-state in the filesystem. I have plans to fix both of these.
 
-```python
-class Settings(Config):
-    foo: Annotated[str, CLIFlags("foo", "f")] = Field(description="Value of Foo")
-    bar: Annotated[str|None, CLIFlags("bar")] = Field(
-        description="Name of Bar, if any",
-        default=None,
-    )
-    baz: int = Field(description="Amount of Baz")
-```
+**TODO**: a lot of this is already in [features.Changing](./features.md#changing)
+Find the design that works best without re-writing everything. Either split with
+design principle (what we want to assure) vs feature (what we do assure), or if they're
+too similar write the idea mostly here and reference it in `Changing`.
 
 
 ## Scoped ownership
 
-An application's structure hierarchy should map to its config structure.
-Each component declares its own config section with the fields it needs, and does not need to be 
+Notifig was created under the idea that the shape of a config should naturally emerge from,
+and structurally match, the shape of the project it is applied to.
+
+Your project is (hopefully) structured into components that are delegated to clear tasks.
+Your server needs to know which hosts to accept and which port to listen on.
+Your database needs a connection URL and a schema type.
+Your logger needs a level and a file path.
+
+Scoped ownership is the design principle that these sections can express their config
+needs through their own section, preventing accidental access.
+Your logger can't change your server config's URL because it doesn't know it exists.
+
+*This is the single design principle that applies to usage instead of library design,
+and it's optional, but highly recommended.
+Notifig was built to support a wide range of use-cases, including a single state tree shared
+across every component, but was designed with a distributed scoped structure in mind*
 
 
-## Reactive state
+## Reactive persistent state
+
+`Config` should be a live representation of the filesystem state, and any changes to
+it should immediately inform interested parties.
 
 Adding, changing or deleting an entry should able to trigger behavior instead of relying on periodic checks.
 An observer is a callable or coroutine registered to a path, and it's called whenever it is altered.
