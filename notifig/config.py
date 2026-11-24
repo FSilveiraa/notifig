@@ -1,4 +1,3 @@
-import sys
 from os import PathLike
 from typing import Annotated, Any, override
 
@@ -25,16 +24,14 @@ class Config(BaseSettings, ConfigSection):
         cli_kebab_case=True,
         cli_implicit_flags=True,
         cli_enforce_required=False,
+        cli_parse_args=True,
         default_config_files=[],
         # NOTE: `.env` is picked up by default, pass `env_file=None` to disable.
         # Reasoning: A `.env` is the one file expected to be picked up by default
         #  on any system.
         env_file=".env",
-        ignore_unrelated_dotenv=False,
+        dotenv_ignore_unrelated=False,
     )
-
-    # Whether to read `sys.argv`. An internal switch, never saved or edited
-    parse_cli: bool = Field(default=True, exclude=True)
 
     # Whether to auto-save the config on every change
     auto_save: bool = Field(
@@ -106,14 +103,18 @@ class Config(BaseSettings, ConfigSection):
         dotenv_settings,
         file_secret_settings,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Build the settings-source stack. CLI args flow through `cli_parse_args`;
-        `--config` flags are split out for ConfigFileSource."""
-        # Parse CLI args list. If `parse_cli` is absent from init_kwargs,
-        # then it wasn't passed, use field default
-        parse_cli: bool | None = init_settings.init_kwargs.get("parse_cli")
-        if parse_cli is None:
-            parse_cli = settings_cls.model_fields["parse_cli"].get_default()
-        argv = sys.argv[1:] if parse_cli else []
+        """
+        Build the stack of settings sources.
+
+        The CLI source uses the default Pydantic-settings flow that reads
+        `ConfigDict.cli_parse_args: bool` to decide whether to parse CLI args.
+
+        The `.env` source by default will raise if an unrelated key is found.
+        If `ConfigDict.dotenv_ignore_unrelated` is set to `True`, the source
+        will be overridden to ignore them.
+
+        File sources come from a custom `ConfigFileSource` that uses anyconfig.
+        """
 
         # A key must match the flag name pydantic-settings generated for the field,
         #  which `cli_kebab_case` makes kebab-case: `max_context` -> `max-context`,
@@ -143,7 +144,7 @@ class Config(BaseSettings, ConfigSection):
                     )
                 claimed_by[flag] = path
 
-        if cls.model_config.get("ignore_unrelated_dotenv", False):
+        if cls.model_config.get("dotenv_ignore_unrelated", False):
             # Ignore unrelated entries in .env
             dotenv_settings = DotEnvSourceIgnoringUnrelatedKeys(settings_cls)
 
@@ -152,7 +153,6 @@ class Config(BaseSettings, ConfigSection):
             init_settings,
             CliSettingsSource(
                 settings_cls,
-                cli_parse_args=argv,
                 cli_shortcuts=shortcuts,
             ),
             env_settings,

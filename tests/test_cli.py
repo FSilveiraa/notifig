@@ -14,7 +14,7 @@ from pydantic import Field
 
 from notifig import CLIFlags, Config, ConfigDict, ConfigSection, Delimited
 
-from .conftest import set_argv
+from .conftest import TestConfig, set_argv
 
 
 class Cli(Config):
@@ -49,17 +49,20 @@ def test_a_comma_separated_field_takes_one_flag(monkeypatch):
 
 
 def test_two_fields_claiming_one_flag_is_an_error():
-    class Clashing(Config):
+    class Clashing(TestConfig):
         first: Annotated[int, CLIFlags("d")] = 0
         second: Annotated[int, CLIFlags("d")] = 0
 
     with pytest.raises(ValueError, match="claimed by both"):
-        Clashing(parse_cli=False)
+        Clashing()
 
 
-def test_parse_cli_false_ignores_the_arguments(monkeypatch):
+def test_cli_parse_args_false_ignores_the_arguments(monkeypatch):
+    class NoCli(Cli, TestConfig):
+        pass
+
     set_argv(monkeypatch, "-p", "9000")
-    assert Cli(parse_cli=False).port == 8000
+    assert NoCli().port == 8000
 
 
 def test_a_reserved_shortcut_is_refused_when_declared():
@@ -125,20 +128,20 @@ def test_cli_shortcuts_in_model_config_and_collisions(monkeypatch):
     parsed = WithShortcuts()
     assert (parsed.port, parsed.name) == (8080, "named")
 
-    class Colliding(Config):
+    class Colliding(TestConfig):
         model_config = ConfigDict(cli_shortcuts={"name": "d"})
         port: Annotated[int, CLIFlags("d")] = 8000
         name: str = "default"
 
     with pytest.raises(ValueError, match="claimed by both"):
-        Colliding(parse_cli=False)
+        Colliding()
 
-    class BothWays(Config):
+    class BothWays(TestConfig):
         model_config = ConfigDict(cli_shortcuts={"port": "d"})
         port: Annotated[int, CLIFlags("d")] = 8000
 
     with pytest.raises(ValueError, match="claimed by both"):
-        BothWays(parse_cli=False)
+        BothWays()
 
 
 def test_cli_flags_to_argparse_formats_short_and_long_flags():

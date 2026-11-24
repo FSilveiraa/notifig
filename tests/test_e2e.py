@@ -29,6 +29,7 @@ from notifig.section.dynamic import DynamicSection
 
 from .conftest import (
     EntryConfig,
+    TestConfig,
     TypedEntry,
     set_argv,
     write_files,
@@ -213,7 +214,10 @@ def test_the_config_saves_and_reloads_identically(tmp_path, monkeypatch):
     saved = tmp_path / "saved.toml"
     settings.save(saved)
 
-    reloaded = Settings(config_files=[str(saved)], parse_cli=False)
+    class ReloadedSettings(Settings, TestConfig):
+        pass
+
+    reloaded = ReloadedSettings(config_files=[str(saved)])
 
     assert reloaded.api.url == settings.api.url
     assert reloaded.api.port == settings.api.port

@@ -19,12 +19,13 @@ from notifig import (
     AbsolutePath,
     Choice,
     CLIFlags,
-    Config,
     ConfigSection,
     Delimited,
     Link,
     PathPattern,
 )
+
+from .conftest import TestConfig
 
 # --- CLIFlags -----------------------------------------------------------------
 
@@ -91,11 +92,11 @@ def test_a_delimited_field_takes_a_comma_string_from_the_environment(monkeypatch
     """A delimited field is read from env as text, not JSON: the "don't decode"
     marker travels inside `Delimited`, so no field has to name it."""
 
-    class Env(Config):
+    class Env(TestConfig):
         tags: Annotated[list[str], NoDecode, Delimited()] = []
 
     monkeypatch.setenv("TAGS", "a,b")
-    assert Env(parse_cli=False).tags == ["a", "b"]
+    assert Env().tags == ["a", "b"]
 
 
 # --- Choice -------------------------------------------------------------------
@@ -246,20 +247,20 @@ class Webhooks(ConfigSection):
     local_link: ClassVar[Link[str]] = Link("local")
 
 
-class Linked(Config):
+class Linked(TestConfig):
     api: Api = Field(default_factory=Api)
     webhooks: Webhooks = Field(default_factory=Webhooks)
 
 
 def test_a_rooted_link_follows_the_source_field():
-    settings = Linked(parse_cli=False)
+    settings = Linked()
     assert settings.webhooks.api_url == "https://default.test"
     settings.api.url = "https://changed.test"
     assert settings.webhooks.api_url == "https://changed.test"  # live, not copied
 
 
 def test_a_relative_link_reads_from_its_own_section():
-    assert Linked(parse_cli=False).webhooks.local_link == "local-value"
+    assert Linked().webhooks.local_link == "local-value"
 
 
 def test_a_link_is_reachable_from_the_class_as_itself():
@@ -280,7 +281,7 @@ def test_a_link_on_an_unattached_section_says_so():
 def test_writing_a_link_raises():
     """A link is read-only. The error today is a path error rather than a
     read-only one, but it is an `AttributeError`, so the write never lands."""
-    settings = Linked(parse_cli=False)
+    settings = Linked()
     with pytest.raises(AttributeError):
         settings.webhooks.api_url = "https://nope.test"
     assert settings.webhooks.api_url == "https://default.test"
