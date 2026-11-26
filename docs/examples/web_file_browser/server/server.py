@@ -27,7 +27,10 @@ class FileBrowserServer(Application):
         @self.router.get("/files/{path:path}")
         async def list_path(path: str) -> Response:
             entries = self.filesystem_browser.list_directory(path)
-            return json([str(entry) for entry in entries])
+            return json({
+                entry.path.name: entry.model_dump(mode="json")
+                for entry in entries
+            })
 
 
     def _register_error_handlers(self):

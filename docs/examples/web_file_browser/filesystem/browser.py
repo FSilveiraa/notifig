@@ -2,34 +2,42 @@ import os
 import stat
 from pathlib import Path
 
+from pydantic import BaseModel, ByteSize
+
 from .config import FilesystemConfig
+
+
+class PathInfo(BaseModel):
+    path: Path
+    is_dir: bool
+    size: ByteSize
 
 
 class FilesystemBrowser:
     def __init__(self, config: FilesystemConfig):
         self.config = config
 
-    def list_directory(self, path: str | Path) -> list[Path]:
+
+    def list_directory(self, path: str | Path) -> list[PathInfo]:
         """Lists visible paths under given path."""
         # Find the absolute path
-        full_path = Path(path)
-        if not full_path.is_absolute():
-            full_path = self.config.root / full_path
-        full_path = full_path.resolve()
+        full_path = (self.config.root / Path(path)).resolve()
         # Confirm the path is legal
         self._check_path(full_path)
-        # Return the entries if it's a directory, or the full path otherwise
-        subpaths = [full_path]
-        if full_path.is_dir():
-            subpaths = []
-            for path in full_path.iterdir():
-                try:
-                    self._check_visibility(path)
-                except PermissionError:
-                    continue
-                else:
-                    subpaths.append(path)
-        return subpaths
+        # Confirm it's a directory
+        if not full_path.is_dir():
+            raise NotADirectoryError(f"{full_path} is not a directory.")
+
+        entries: list[PathInfo] = []
+        for subpath in full_path.iterdir():
+            try:
+                self._check_visibility(subpath)
+            except PermissionError:
+                continue
+            else:
+                entries.append(self._get_path_info(subpath))
+        return entries
+
 
     def _check_path(self, path: Path) -> None:
         """
@@ -53,6 +61,7 @@ class FilesystemBrowser:
         if not path.exists():
             raise FileNotFoundError(f"'{path}' does not exist.")
 
+
     def _check_visibility(self, path: Path) -> None:
         """Checks whether a path can be shown according to the config."""
         if not self.config.show_hidden and self._is_hidden(path):
@@ -61,6 +70,7 @@ class FilesystemBrowser:
             )
         if self._is_ignored(path):
             raise PermissionError(f"'{path}' matches an ignore pattern.")
+
 
     @staticmethod
     def _is_hidden(path: Path) -> bool:
@@ -79,6 +89,15 @@ class FilesystemBrowser:
                 return True
         return False
 
+
     def _is_ignored(self, path: Path) -> bool:
         """Does this path match the config's ignore patterns?"""
         return any(path.match(str(pattern)) for pattern in self.config.ignore)
+
+    @staticmethod
+    def _get_path_info(path: Path) -> PathInfo:
+        return PathInfo(
+            path=path,
+            is_dir=path.is_dir(),
+            size=path.stat().st_size,
+        )
