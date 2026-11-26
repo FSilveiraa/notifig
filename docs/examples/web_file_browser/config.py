@@ -8,7 +8,7 @@ from .user import UsersConfig
 
 
 
-class FileBrowserConfig(Config):
+class WebFileBrowserConfig(Config):
     users: UsersConfig = Field(
         description="Registered users. If empty, login is disabled.",
         default_factory=UsersConfig,

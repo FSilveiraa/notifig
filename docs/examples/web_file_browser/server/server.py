@@ -25,7 +25,7 @@ class FileBrowserServer(Application):
             return await read_path(Path("."))
 
         @self.router.get("/files/{path:path}")
-        async def read_path(path: Path) -> Response:
+        async def read_path(path: str) -> Response:
             entries = self.file_browser.list_directory(path)
             return json([str(entry) for entry in entries])
 
