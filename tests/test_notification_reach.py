@@ -135,7 +135,8 @@ def test_observers_inside_a_replaced_section_hear_inner_changes(settings):
     settings.set(**{"api.inner.token": "t2"})
     assert heard_api == ["inner.token"]
     assert heard_inner == ["token"]
-    # 2. Whole-section replacement: exercises `_find_changes_compared_to` + routing into `api` and `api.inner`
+    # 2. Whole-section replacement: exercises `_find_changes_compared_to`
+    #  plus routing into `api` and `api.inner`
     heard_api.clear()
     heard_inner.clear()
     settings.set(api={"url": "https://example.test/v1", "inner": {"token": "t3"}})

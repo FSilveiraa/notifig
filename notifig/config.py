@@ -41,7 +41,12 @@ class Config(BaseSettings, ConfigSection):
 
     # Config file paths read, sorted lowest -> highest priority.
     # Add flags and defaults for this field using:
-    #  `ConfigDict(cli_shortcuts={"config_files":["c", "config"]}, default_config_files=["~/config.json"])`
+    #  ```python
+    #  ConfigDict(
+    #       cli_shortcuts={"config_files":["c", "config"]},
+    #       default_config_files=["~/config.json"]
+    #  )
+    #  ```
     # NOTE: Remove NoDecode once pydantic-settings PR lands
     config_files: Annotated[list[AbsolutePath], NoDecode, Delimited()] = Field(
         default_factory=list, exclude=True

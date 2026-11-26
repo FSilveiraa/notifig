@@ -226,7 +226,8 @@ class DynamicSection[T](ConfigSection):
                 types_to_set |= {args[0]: args[1]}
             else:
                 raise ValueError(
-                    f"`set_type` expects exactly 2 or no positional arguments, found {len(args)}: {args}."
+                    f"`set_type` expects exactly 2 or no positional arguments,"
+                    f" found {len(args)}: {args}."
                 )
 
         requests: list[ChangeRequest] = [

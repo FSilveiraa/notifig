@@ -75,7 +75,7 @@ class FileBrowser:
         #  block everyone has been copying from StackOverflow since 2014
         if os.name == "nt":
             if bool(
-                    path.lstat().st_file_attributes
+                    getattr(path.lstat(), "st_file_attributes", 0)
                     & stat.FILE_ATTRIBUTE_HIDDEN
             ):
                 return True

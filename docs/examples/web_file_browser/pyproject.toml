@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "web-file-browser"
+version = "0.1.0"
+description = "Web file browser built with notifig."
+requires-python = ">=3.13"
+dependencies = [
+    "notifig>=0.3.0",
+]
+
+[tool.setuptools.package-dir]
+web_file_browser = "."
+
+[tool.ruff]
+extend = "../../../pyproject.toml"
