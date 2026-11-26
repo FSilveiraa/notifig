@@ -5,7 +5,7 @@ import uvicorn
 from blacksheep import Application, Request, Response, json, text
 
 from .config import ServerConfig
-from ..filesystem.browser import FilesystemBrowser
+from ..filesystem import FilesystemBrowser
 
 
 class FileBrowserServer(Application):
@@ -22,10 +22,10 @@ class FileBrowserServer(Application):
     def _register_routes(self):
         @self.router.get("/")
         async def list_root() -> Response:
-            return await read_path(Path("."))
+            return await list_path(".")
 
         @self.router.get("/files/{path:path}")
-        async def read_path(path: str) -> Response:
+        async def list_path(path: str) -> Response:
             entries = self.filesystem_browser.list_directory(path)
             return json([str(entry) for entry in entries])
 
