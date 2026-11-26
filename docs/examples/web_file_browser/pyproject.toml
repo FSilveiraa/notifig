@@ -9,6 +9,8 @@ description = "Web file browser built with notifig."
 requires-python = ">=3.13"
 dependencies = [
     "notifig>=0.3.0",
+    "blacksheep>=2.0.0",
+    "uvicorn>=0.30.0",
 ]
 
 [tool.setuptools.package-dir]
