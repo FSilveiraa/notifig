@@ -2,10 +2,9 @@ from pydantic import Field
 
 from notifig import Config
 
-from .file import FilesystemConfig
+from .filesystem import FilesystemConfig
 from .server import ServerConfig
 from .user import UsersConfig
-
 
 
 class WebFileBrowserConfig(Config):

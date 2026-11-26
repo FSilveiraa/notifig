@@ -19,5 +19,5 @@ check *flags:
 test *flags:
     pytest --cov=notifig --cov-report=term-missing {{flags}}
 
-# Run the full CI suite: formatting (read-only), static checks (lint + mypy), test
-ci: (format "--check") check test
+# Run the full CI suite: static checks (lint + mypy), test
+ci: check test

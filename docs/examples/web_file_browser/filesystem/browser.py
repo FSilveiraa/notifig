@@ -5,17 +5,16 @@ from pathlib import Path
 from .config import FilesystemConfig
 
 
-class FileBrowser:
+class FilesystemBrowser:
     def __init__(self, config: FilesystemConfig):
         self.config = config
-
 
     def list_directory(self, path: str | Path) -> list[Path]:
         """Lists visible paths under given path."""
         # Find the absolute path
         full_path = Path(path)
         if not full_path.is_absolute():
-            full_path = (self.config.root / full_path)
+            full_path = self.config.root / full_path
         full_path = full_path.resolve()
         # Confirm the path is legal
         self._check_path(full_path)
@@ -31,7 +30,6 @@ class FileBrowser:
                 else:
                     subpaths.append(path)
         return subpaths
-
 
     def _check_path(self, path: Path) -> None:
         """
@@ -55,14 +53,14 @@ class FileBrowser:
         if not path.exists():
             raise FileNotFoundError(f"'{path}' does not exist.")
 
-
     def _check_visibility(self, path: Path) -> None:
         """Checks whether a path can be shown according to the config."""
         if not self.config.show_hidden and self._is_hidden(path):
-            raise PermissionError(f"'{path}' is hidden and cannot be shown according to the settings.")
+            raise PermissionError(
+                f"'{path}' is hidden and cannot be shown according to the settings."
+            )
         if self._is_ignored(path):
             raise PermissionError(f"'{path}' matches an ignore pattern.")
-
 
     @staticmethod
     def _is_hidden(path: Path) -> bool:
@@ -75,16 +73,12 @@ class FileBrowser:
         #  block everyone has been copying from StackOverflow since 2014
         if os.name == "nt":
             if bool(
-                    getattr(path.lstat(), "st_file_attributes", 0)
-                    & stat.FILE_ATTRIBUTE_HIDDEN
+                getattr(path.lstat(), "st_file_attributes", 0)
+                & stat.FILE_ATTRIBUTE_HIDDEN
             ):
                 return True
         return False
 
     def _is_ignored(self, path: Path) -> bool:
         """Does this path match the config's ignore patterns?"""
-        return any(
-                path.match(str(pattern))
-                for pattern in self.config.ignore
-        )
-
+        return any(path.match(str(pattern)) for pattern in self.config.ignore)

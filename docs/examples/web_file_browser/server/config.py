@@ -5,9 +5,7 @@ from notifig import ConfigSection
 
 IpAddress = Annotated[
     IPvAnyAddress,
-    BeforeValidator(
-        lambda host: "127.0.0.1" if host == "localhost" else host
-    ),
+    BeforeValidator(lambda host: "127.0.0.1" if host == "localhost" else host),
 ]
 
 
